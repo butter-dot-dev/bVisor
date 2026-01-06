@@ -278,3 +278,96 @@ test "close stdin (fd=0) passthroughs" {
     // Should passthrough
     try testing.expectEqual(linux.SECCOMP.USER_NOTIF_FLAG_CONTINUE, resp.flags);
 }
+
+test "read from virtual FD returns data" {
+    var supervisor = Self.initForTesting(testing.allocator);
+    defer supervisor.deinit();
+
+    // Open a file for writing
+    const path_buf = "/test.txt";
+    const open_write_notif = makeNotif(.openat, .{
+        .arg0 = @bitCast(@as(i64, linux.AT.FDCWD)),
+        .arg1 = @intFromPtr(path_buf.ptr),
+        .arg2 = 0o101, // O_WRONLY | O_CREAT
+        .arg3 = 0o644,
+    });
+    const open_write_notification = try Notification.from_notif(supervisor.mem_bridge, open_write_notif);
+    const open_write_response = try open_write_notification.handle(&supervisor);
+    const write_fd = open_write_response.to_notif_resp().val;
+
+    // Write data
+    const write_data = "Hello from VFS!";
+    const write_notif = makeNotif(.write, .{
+        .arg0 = @intCast(write_fd),
+        .arg1 = @intFromPtr(write_data.ptr),
+        .arg2 = write_data.len,
+    });
+    const write_notification = try Notification.from_notif(supervisor.mem_bridge, write_notif);
+    _ = try write_notification.handle(&supervisor);
+    supervisor.filesystem.close(@intCast(write_fd));
+
+    // Open for reading
+    const open_read_notif = makeNotif(.openat, .{
+        .arg0 = @bitCast(@as(i64, linux.AT.FDCWD)),
+        .arg1 = @intFromPtr(path_buf.ptr),
+        .arg2 = 0o0, // O_RDONLY
+        .arg3 = 0,
+    });
+    const open_read_notification = try Notification.from_notif(supervisor.mem_bridge, open_read_notif);
+    const open_read_response = try open_read_notification.handle(&supervisor);
+    const read_fd = open_read_response.to_notif_resp().val;
+
+    // Read data back
+    var read_buf: [32]u8 = undefined;
+    const read_notif = makeNotif(.read, .{
+        .arg0 = @intCast(read_fd),
+        .arg1 = @intFromPtr(&read_buf),
+        .arg2 = read_buf.len,
+    });
+    const read_notification = try Notification.from_notif(supervisor.mem_bridge, read_notif);
+    const read_response = try read_notification.handle(&supervisor);
+    const read_resp = read_response.to_notif_resp();
+
+    // Should return 15 bytes read
+    try testing.expectEqual(@as(i32, 0), read_resp.@"error");
+    try testing.expectEqual(@as(i64, 15), read_resp.val);
+    try testing.expectEqualStrings("Hello from VFS!", read_buf[0..15]);
+}
+
+test "read from stdin (fd=0) passthroughs" {
+    var supervisor = Self.initForTesting(testing.allocator);
+    defer supervisor.deinit();
+
+    var read_buf: [32]u8 = undefined;
+    const notif = makeNotif(.read, .{
+        .arg0 = 0, // stdin
+        .arg1 = @intFromPtr(&read_buf),
+        .arg2 = 32,
+    });
+
+    const notification = try Notification.from_notif(supervisor.mem_bridge, notif);
+    const response = try notification.handle(&supervisor);
+    const resp = response.to_notif_resp();
+
+    // Should passthrough
+    try testing.expectEqual(linux.SECCOMP.USER_NOTIF_FLAG_CONTINUE, resp.flags);
+}
+
+test "read from bad FD returns EBADF" {
+    var supervisor = Self.initForTesting(testing.allocator);
+    defer supervisor.deinit();
+
+    var read_buf: [32]u8 = undefined;
+    const notif = makeNotif(.read, .{
+        .arg0 = 999, // bad FD
+        .arg1 = @intFromPtr(&read_buf),
+        .arg2 = 32,
+    });
+
+    const notification = try Notification.from_notif(supervisor.mem_bridge, notif);
+    const response = try notification.handle(&supervisor);
+    const resp = response.to_notif_resp();
+
+    // Should return EBADF
+    try testing.expectEqual(@intFromEnum(linux.E.BADF), resp.@"error");
+}

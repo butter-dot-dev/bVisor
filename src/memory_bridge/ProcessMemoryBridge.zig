@@ -101,3 +101,25 @@ pub fn write(self: Self, T: type, val: T, child_addr: u64) !void {
         ),
     ).unwrap();
 }
+
+/// Write bytes from local buffer into child's address space
+pub fn writeSlice(self: Self, src: []const u8, child_addr: u64) !void {
+    const local_iovec: [1]posix.iovec_const = .{.{
+        .base = src.ptr,
+        .len = src.len,
+    }};
+
+    const child_iovec: [1]posix.iovec_const = .{.{
+        .base = @ptrFromInt(child_addr),
+        .len = src.len,
+    }};
+
+    _ = try LinuxResult(usize).from(
+        linux.process_vm_writev(
+            self.child_pid,
+            &local_iovec,
+            &child_iovec,
+            0,
+        ),
+    ).unwrap();
+}

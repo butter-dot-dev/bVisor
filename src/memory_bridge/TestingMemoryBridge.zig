@@ -26,3 +26,9 @@ pub fn write(_: Self, T: type, val: T, addr: u64) !void {
     const ptr: *T = @ptrFromInt(addr);
     ptr.* = val;
 }
+
+/// Write bytes from src to addr (local memcpy)
+pub fn writeSlice(_: Self, src: []const u8, addr: u64) !void {
+    const dest: [*]u8 = @ptrFromInt(addr);
+    @memcpy(dest[0..src.len], src);
+}

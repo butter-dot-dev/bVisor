@@ -1,5 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
+const builtin = @import("builtin");
 const types = @import("types.zig");
 const FD = types.FD;
 
@@ -32,6 +33,25 @@ pub fn init(allocator: std.mem.Allocator) Self {
 pub fn deinit(self: *Self) void {
     // Free all open file entries
     self.open_fds.deinit();
+
+    // Debug: print file contents before freeing (skip during tests)
+    if (!builtin.is_test and self.files.count() > 0) {
+        std.debug.print("\n\x1b[93m=== Virtual Filesystem Contents ===\x1b[0m\n", .{});
+        var debug_it = self.files.iterator();
+        while (debug_it.next()) |entry| {
+            const path = entry.key_ptr.*;
+            const file = entry.value_ptr.*;
+            std.debug.print("\x1b[96m{s}\x1b[0m ({d} bytes, mode=0o{o}):\n", .{
+                path,
+                file.data.items.len,
+                file.mode,
+            });
+            if (file.data.items.len > 0) {
+                std.debug.print("{s}\n", .{file.data.items});
+            }
+        }
+        std.debug.print("\x1b[93m===================================\x1b[0m\n\n", .{});
+    }
 
     // Free all file data and paths
     var it = self.files.iterator();

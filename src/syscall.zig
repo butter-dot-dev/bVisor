@@ -7,16 +7,20 @@ const Logger = types.Logger;
 // All supported syscalls
 const ClockNanosleep = @import("./syscalls/ClockNanosleep.zig");
 const Openat = @import("./syscalls/Openat.zig");
-const Writev = @import("./syscalls/Writev.zig");
+const Read = @import("./syscalls/Read.zig");
+const Readv = @import("./syscalls/Readv.zig");
 const Write = @import("./syscalls/Write.zig");
+const Writev = @import("./syscalls/Writev.zig");
 const Close = @import("./syscalls/Close.zig");
 
 /// Union of all emulated syscalls.
 pub const Syscall = union(enum) {
     clock_nanosleep: ClockNanosleep,
     openat: Openat,
-    writev: Writev,
+    read: Read,
+    readv: Readv,
     write: Write,
+    writev: Writev,
     close: Close,
 
     const Self = @This();
@@ -28,8 +32,10 @@ pub const Syscall = union(enum) {
         switch (sys_code) {
             .clock_nanosleep => return .{ .clock_nanosleep = try ClockNanosleep.parse(mem_bridge, notif) },
             .openat => return .{ .openat = try Openat.parse(mem_bridge, notif) },
-            .writev => return .{ .writev = try Writev.parse(mem_bridge, notif) },
+            .read => return .{ .read = try Read.parse(mem_bridge, notif) },
+            .readv => return .{ .readv = try Readv.parse(mem_bridge, notif) },
             .write => return .{ .write = try Write.parse(mem_bridge, notif) },
+            .writev => return .{ .writev = try Writev.parse(mem_bridge, notif) },
             .close => return .{ .close = try Close.parse(mem_bridge, notif) },
             else => return null,
         }
