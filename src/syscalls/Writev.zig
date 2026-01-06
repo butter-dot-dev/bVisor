@@ -60,25 +60,29 @@ pub fn handle(self: Self, supervisor: anytype) !Result {
         self.data_len,
     });
 
-    // If fd is stdout (1) or stderr (2), passthrough to kernel
+    // stdout/stderr always passthrough
     if (self.fd == 1 or self.fd == 2) {
         logger.log("writev: passthrough for fd={d}", .{self.fd});
         return .{ .passthrough = {} };
     }
 
-    // Otherwise, write to virtual filesystem
     const filesystem = &supervisor.filesystem;
 
-    // Check if this is a virtual FD
-    if (!filesystem.isVirtualFD(self.fd)) {
-        logger.log("writev: fd={d} is not a virtual FD, returning EBADF", .{self.fd});
-        return .{ .handled = Result.Handled.err(.BADF) };
+    // Check FDBackend - passthrough for kernel FDs or unknown FDs
+    const kind = filesystem.getFDBackend(self.fd);
+    if (kind == null or std.meta.activeTag(kind.?) == .kernel) {
+        logger.log("writev: passthrough for kernel/unknown fd={d}", .{self.fd});
+        return .{ .passthrough = {} };
     }
 
+    // Virtual FD - write to VFS
     const data = self.data_buf[0..self.data_len];
     const bytes_written = filesystem.write(self.fd, data) catch |err| {
         logger.log("writev failed: {}", .{err});
-        return .{ .handled = Result.Handled.err(.BADF) };
+        return switch (err) {
+            error.KernelFD => .{ .passthrough = {} },
+            else => .{ .handled = Result.Handled.err(.BADF) },
+        };
     };
 
     logger.log("writev: wrote {d} bytes to virtual fd={d}", .{ bytes_written, self.fd });

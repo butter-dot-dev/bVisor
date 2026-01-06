@@ -46,16 +46,17 @@ pub fn handle(self: Self, supervisor: anytype) !Result {
         self.total_len,
     });
 
-    // If fd is stdin (0), passthrough to kernel
+    // stdin passthrough
     if (self.fd == 0) {
         logger.log("readv: passthrough for fd=0 (stdin)", .{});
         return .{ .passthrough = {} };
     }
 
-    // Check if this is a virtual FD
-    if (!filesystem.isVirtualFD(self.fd)) {
-        logger.log("readv: fd={d} is not a virtual FD, returning BADF", .{self.fd});
-        return .{ .handled = Result.Handled.err(.BADF) };
+    // Check FDBackend - passthrough for kernel FDs or unknown FDs
+    const kind = filesystem.getFDBackend(self.fd);
+    if (kind == null or std.meta.activeTag(kind.?) == .kernel) {
+        logger.log("readv: passthrough for kernel/unknown fd={d}", .{self.fd});
+        return .{ .passthrough = {} };
     }
 
     // Read from virtual filesystem into local buffer
@@ -65,6 +66,7 @@ pub fn handle(self: Self, supervisor: anytype) !Result {
         logger.log("readv failed: {}", .{err});
         return switch (err) {
             error.NotOpenForReading => .{ .handled = Result.Handled.err(.BADF) },
+            error.KernelFD => .{ .passthrough = {} },
             else => .{ .handled = Result.Handled.err(.IO) },
         };
     };

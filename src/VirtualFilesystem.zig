@@ -6,10 +6,6 @@ const FD = types.FD;
 
 const Self = @This();
 
-// Use managed ArrayList that stores allocator internally
-const ManagedArrayList = std.array_list.AlignedManaged(u8, null);
-
-// Access mode is in the bottom 2 bits of flags
 const O_ACCMODE: u32 = 0o3;
 const O_RDONLY: u32 = 0o0;
 const O_WRONLY: u32 = 0o1;
@@ -17,27 +13,39 @@ const O_RDWR: u32 = 0o2;
 const O_CREAT: u32 = 0o100;
 const O_TRUNC: u32 = 0o1000;
 
+/// Where a FD's operations are handled. Kernel FDs upgrade to virtual on write (COW).
+pub const FDBackend = union(enum) {
+    kernel: []const u8, // path, for COW
+    virtual: VirtualFile.Handle,
+};
+
 allocator: std.mem.Allocator,
-files: std.StringHashMap(*File), // path → File (owns data, persists after close)
-open_fds: std.AutoHashMap(FD, OpenFile), // FD → open file state
-next_fd: FD = 3, // Start at 3 since 0,1,2 are stdin/stdout/stderr
+virtual_files: std.StringHashMap(*VirtualFile), // persists after close
+open_fds: std.AutoHashMap(FD, FDBackend),
+next_fd: FD = 3, // 0,1,2 are stdio
 
 pub fn init(allocator: std.mem.Allocator) Self {
     return .{
         .allocator = allocator,
-        .files = std.StringHashMap(*File).init(allocator),
-        .open_fds = std.AutoHashMap(FD, OpenFile).init(allocator),
+        .virtual_files = std.StringHashMap(*VirtualFile).init(allocator),
+        .open_fds = std.AutoHashMap(FD, FDBackend).init(allocator),
     };
 }
 
 pub fn deinit(self: *Self) void {
-    // Free all open file entries
+    var fd_it = self.open_fds.iterator();
+    while (fd_it.next()) |entry| {
+        switch (entry.value_ptr.*) {
+            .virtual => {},
+            .kernel => |path| self.allocator.free(path),
+        }
+    }
     self.open_fds.deinit();
 
-    // Debug: print file contents before freeing (skip during tests)
-    if (!builtin.is_test and self.files.count() > 0) {
+    // Debug: dump VFS contents (skip in tests)
+    if (!builtin.is_test and self.virtual_files.count() > 0) {
         std.debug.print("\n\x1b[93m=== Virtual Filesystem Contents ===\x1b[0m\n", .{});
-        var debug_it = self.files.iterator();
+        var debug_it = self.virtual_files.iterator();
         while (debug_it.next()) |entry| {
             const path = entry.key_ptr.*;
             const file = entry.value_ptr.*;
@@ -53,26 +61,20 @@ pub fn deinit(self: *Self) void {
         std.debug.print("\x1b[93m===================================\x1b[0m\n\n", .{});
     }
 
-    // Free all file data and paths
-    var it = self.files.iterator();
+    var it = self.virtual_files.iterator();
     while (it.next()) |entry| {
-        entry.value_ptr.*.data.deinit();
+        entry.value_ptr.*.data.deinit(self.allocator);
         self.allocator.destroy(entry.value_ptr.*);
         self.allocator.free(entry.key_ptr.*);
     }
-    self.files.deinit();
+    self.virtual_files.deinit();
 }
 
-/// Open a file, creating it if it doesn't exist (based on flags)
 pub fn open(self: *Self, path: []const u8, flags: u32, mode: u32) !FD {
     const access_mode = flags & O_ACCMODE;
-
-    // Check if file exists
-    var file: *File = undefined;
-    if (self.files.get(path)) |existing| {
+    var file: *VirtualFile = undefined;
+    if (self.virtual_files.get(path)) |existing| {
         file = existing;
-
-        // Check permissions against requested access (owner bits)
         const owner_read = (file.mode & 0o400) != 0;
         const owner_write = (file.mode & 0o200) != 0;
 
@@ -85,100 +87,121 @@ pub fn open(self: *Self, path: []const u8, flags: u32, mode: u32) !FD {
         if (access_mode == O_RDWR and (!owner_read or !owner_write)) {
             return error.PermissionDenied;
         }
-
-        // Handle O_TRUNC - truncate file if opened for writing
         if ((flags & O_TRUNC) != 0 and (access_mode == O_WRONLY or access_mode == O_RDWR)) {
             file.data.clearRetainingCapacity();
         }
     } else {
-        // File doesn't exist - need O_CREAT to create
-        if ((flags & O_CREAT) == 0) {
-            return error.FileNotFound;
-        }
+        if ((flags & O_CREAT) == 0) return error.FileNotFound;
 
-        // Create new file with specified mode
-        const new_file = try self.allocator.create(File);
-        new_file.* = .{
-            .data = ManagedArrayList.init(self.allocator),
-            .mode = mode & 0o777, // Mask to permission bits only
-        };
-        // Dupe the path for storage
+        const new_file = try self.allocator.create(VirtualFile);
+        new_file.* = .{ .mode = mode & 0o777 };
         const owned_path = try self.allocator.dupe(u8, path);
-        try self.files.put(owned_path, new_file);
+        try self.virtual_files.put(owned_path, new_file);
         file = new_file;
     }
 
-    // Allocate FD and create open file entry
     const fd = self.next_fd;
     self.next_fd += 1;
-
-    try self.open_fds.put(fd, .{
-        .file = file,
-        .offset = 0,
-        .flags = flags,
-    });
-
+    try self.open_fds.put(fd, .{ .virtual = .{ .file = file, .offset = 0, .flags = flags } });
     return fd;
 }
 
-/// Write data to an open file descriptor
 pub fn write(self: *Self, fd: FD, data: []const u8) !usize {
-    const open_file = self.open_fds.getPtr(fd) orelse return error.BadFD;
-
-    // Check if opened for writing
-    const access_mode = open_file.flags & O_ACCMODE;
+    const entry = self.open_fds.getPtr(fd) orelse return error.BadFD;
+    const handle = switch (entry.*) {
+        .virtual => |*h| h,
+        .kernel => return error.KernelFD,
+    };
+    const access_mode = handle.flags & O_ACCMODE;
     if (access_mode != O_WRONLY and access_mode != O_RDWR) {
         return error.NotOpenForWriting;
     }
-
-    // Append data to file
-    try open_file.file.data.appendSlice(data);
-    open_file.offset += data.len;
-
+    try handle.file.data.appendSlice(self.allocator, data);
+    handle.offset += data.len;
     return data.len;
 }
 
-/// Read data from an open file descriptor
 pub fn read(self: *Self, fd: FD, buf: []u8) !usize {
-    const open_file = self.open_fds.getPtr(fd) orelse return error.BadFD;
-
-    // Check if opened for reading
-    const access_mode = open_file.flags & O_ACCMODE;
+    const entry = self.open_fds.getPtr(fd) orelse return error.BadFD;
+    const handle = switch (entry.*) {
+        .virtual => |*h| h,
+        .kernel => return error.KernelFD,
+    };
+    const access_mode = handle.flags & O_ACCMODE;
     if (access_mode != O_RDONLY and access_mode != O_RDWR) {
         return error.NotOpenForReading;
     }
 
-    const file_data = open_file.file.data.items;
-    const remaining = file_data.len - @min(open_file.offset, file_data.len);
+    const file_data = handle.file.data.items;
+    const remaining = file_data.len - @min(handle.offset, file_data.len);
     const to_read = @min(buf.len, remaining);
 
     if (to_read > 0) {
-        @memcpy(buf[0..to_read], file_data[open_file.offset..][0..to_read]);
-        open_file.offset += to_read;
+        @memcpy(buf[0..to_read], file_data[handle.offset..][0..to_read]);
+        handle.offset += to_read;
     }
-
     return to_read;
 }
 
-/// Close a file descriptor (keeps file data for persistence)
+/// Close FD but keep file data.
 pub fn close(self: *Self, fd: FD) void {
-    _ = self.open_fds.remove(fd);
+    if (self.open_fds.fetchRemove(fd)) |entry| {
+        switch (entry.value) {
+            .virtual => {},
+            .kernel => |path| self.allocator.free(path),
+        }
+    }
 }
 
-/// Check if an FD is a virtual file descriptor
-pub fn isVirtualFD(self: *Self, fd: FD) bool {
-    return self.open_fds.contains(fd);
+pub fn getFDBackend(self: *Self, fd: FD) ?FDBackend {
+    return self.open_fds.get(fd);
 }
 
-pub const File = struct {
-    data: ManagedArrayList,
-    mode: u32, // Unix permissions (e.g., 0o644)
-};
+/// Track a passthrough FD for later COW.
+pub fn registerKernelFD(self: *Self, fd: FD, path: []const u8) !void {
+    const owned_path = try self.allocator.dupe(u8, path);
+    try self.open_fds.put(fd, .{ .kernel = owned_path });
+}
 
-pub const OpenFile = struct {
-    file: *File, // Points to File in files map
-    offset: usize, // Per-FD read/write offset
-    flags: u32, // Open flags (read/write mode)
+/// Upgrade kernel FD to virtual by copying content to VFS.
+pub fn copyOnWrite(self: *Self, fd: FD, path: []const u8, content: []const u8, mode: u32) !void {
+    var file: *VirtualFile = undefined;
+    if (self.virtual_files.get(path)) |existing| {
+        file = existing;
+        file.data.clearRetainingCapacity();
+        try file.data.appendSlice(self.allocator, content);
+    } else {
+        const new_file = try self.allocator.create(VirtualFile);
+        new_file.* = .{ .mode = mode & 0o777 };
+        try new_file.data.appendSlice(self.allocator, content);
+        const owned_path = try self.allocator.dupe(u8, path);
+        try self.virtual_files.put(owned_path, new_file);
+        file = new_file;
+    }
+
+    if (self.open_fds.fetchRemove(fd)) |entry| {
+        switch (entry.value) {
+            .kernel => |old_path| self.allocator.free(old_path),
+            .virtual => {}, // embedded, nothing to free
+        }
+    }
+    try self.open_fds.put(fd, .{ .virtual = .{ .file = file, .offset = 0, .flags = O_RDWR } });
+}
+
+pub fn virtualPathExists(self: *Self, path: []const u8) bool {
+    return self.virtual_files.contains(path);
+}
+
+/// A virtual file containing its data in memory
+pub const VirtualFile = struct {
+    data: std.ArrayListUnmanaged(u8) = .{},
+    mode: u32,
+
+    pub const Handle = struct {
+        file: *VirtualFile,
+        offset: usize,
+        flags: u32,
+    };
 };
 
 // ============================================================================
@@ -235,22 +258,22 @@ test "bad FD on read" {
     try std.testing.expectError(error.BadFD, result);
 }
 
-test "isVirtualFD" {
+test "getFDBackend" {
     var vfs = Self.init(std.testing.allocator);
     defer vfs.deinit();
 
-    // stdin/stdout/stderr are not virtual
-    try std.testing.expect(!vfs.isVirtualFD(0));
-    try std.testing.expect(!vfs.isVirtualFD(1));
-    try std.testing.expect(!vfs.isVirtualFD(2));
+    // stdin/stdout/stderr are not tracked
+    try std.testing.expect(vfs.getFDBackend(0) == null);
+    try std.testing.expect(vfs.getFDBackend(1) == null);
+    try std.testing.expect(vfs.getFDBackend(2) == null);
 
     // Open a file, check it's virtual
     const fd = try vfs.open("/test.txt", O_WRONLY | O_CREAT, 0o644);
-    try std.testing.expect(vfs.isVirtualFD(fd));
+    try std.testing.expect(vfs.getFDBackend(fd).? == .virtual);
 
-    // Close it, no longer virtual
+    // Close it, no longer tracked
     vfs.close(fd);
-    try std.testing.expect(!vfs.isVirtualFD(fd));
+    try std.testing.expect(vfs.getFDBackend(fd) == null);
 }
 
 test "permission denied - read-only file, open for write" {

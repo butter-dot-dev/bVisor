@@ -10,6 +10,8 @@ The goal of bVisor is to be lightweight sandbox for untrusted user or LLM-genera
 
 **Status**: Early proof-of-concept. Core seccomp interception works; syscall virtualization is incomplete.
 
+**Greenfield project**: No users, no backward compatibility concerns. Delete dead code freely.
+
 ## Build Commands
 
 ```bash
@@ -58,7 +60,11 @@ src/
 
 **Syscall flow**: Child syscall → kernel USER_NOTIF → Supervisor.recv() → Notification.handle() → Syscall handler or passthrough → Supervisor.send()
 
-**FD handling**: FDs 0,1,2 (stdin/stdout/stderr) passthrough to kernel. All other FDs are virtual - the child process is spawned from scratch so no other real FDs should exist.
+**FD handling**: Uses copy-on-write overlay model with `VirtualFD` union enum:
+- `.kernel` - passthrough to real kernel FD (read/close passthrough)
+- `.virtual` - managed by VFS (read/write/close handled in supervisor)
+- FDs 0,1,2 (stdin/stdout/stderr) always passthrough
+- Unknown FDs > 2 passthrough for read/close, trigger COW on write
 
 **VirtualFilesystem design**:
 - Dual-map: `files` (path → File) persists data, `open_fds` (FD → OpenFile) tracks open state
@@ -98,6 +104,8 @@ test {
 - BPF filter programs
 - `process_vm_readv`/`process_vm_writev` for cross-process memory
 - `pidfd_open`/`pidfd_getfd` for FD operations across processes
+
+**Preference**: Use `pidfd_getfd` to access child FDs rather than `/proc/pid/fd` symlinks. This is more reliable and doesn't require filesystem access.
 
 ## Zig Guidelines
 - Zig 0.16 is required, and includes a new `std.Io` module that provides a unified interface for asynchronous I/O.

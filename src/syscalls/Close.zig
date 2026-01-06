@@ -22,18 +22,21 @@ pub fn handle(self: Self, supervisor: anytype) !Result {
 
     logger.log("Emulating close: fd={d}", .{self.fd});
 
-    // Only stdin/stdout/stderr (0, 1, 2) pass through - all others are virtual
+    // stdin/stdout/stderr always passthrough
     if (self.fd >= 0 and self.fd <= 2) {
         logger.log("close: passthrough for stdio fd={d}", .{self.fd});
         return .{ .passthrough = {} };
     }
 
-    // Otherwise, close virtual file
-    if (!filesystem.isVirtualFD(self.fd)) {
-        logger.log("close: fd={d} is not a virtual FD, returning EBADF", .{self.fd});
-        return .{ .handled = Result.Handled.err(.BADF) };
+    // Check FDBackend - passthrough for kernel FDs or unknown FDs
+    const kind = filesystem.getFDBackend(self.fd);
+    if (kind == null or std.meta.activeTag(kind.?) == .kernel) {
+        // Unknown or kernel FD - passthrough to kernel
+        logger.log("close: passthrough for kernel/unknown fd={d}", .{self.fd});
+        return .{ .passthrough = {} };
     }
 
+    // Virtual FD - close in VFS
     filesystem.close(self.fd);
     logger.log("close: closed virtual fd={d}", .{self.fd});
     return .{ .handled = Result.Handled.success(0) };

@@ -13,6 +13,7 @@ const Logger = types.Logger;
 const Self = @This();
 
 notify_fd: FD,
+child_pid: linux.pid_t,
 logger: Logger,
 mem_bridge: MemoryBridge,
 filesystem: VirtualFileSystem,
@@ -20,6 +21,7 @@ filesystem: VirtualFileSystem,
 pub fn init(notify_fd: FD, child_pid: linux.pid_t, allocator: std.mem.Allocator) Self {
     return .{
         .notify_fd = notify_fd,
+        .child_pid = child_pid,
         .logger = Logger.init(.supervisor),
         .mem_bridge = MemoryBridge.init(child_pid),
         .filesystem = VirtualFileSystem.init(allocator),
@@ -37,6 +39,7 @@ pub fn deinit(self: *Self) void {
 pub fn initForTesting(allocator: std.mem.Allocator) Self {
     return .{
         .notify_fd = -1, // Invalid FD, won't be used in tests
+        .child_pid = 0, // Dummy PID for testing
         .logger = Logger.init(.supervisor),
         .mem_bridge = MemoryBridge.init(0), // Dummy PID, TestingMemoryBridge ignores it
         .filesystem = VirtualFileSystem.init(allocator),
@@ -120,7 +123,7 @@ test "openat with O_CREAT creates virtual FD" {
     try testing.expectEqual(@as(u32, 0), resp.flags); // Not passthrough
 }
 
-test "openat without O_CREAT on missing file returns ENOENT" {
+test "openat read-only on missing file passthroughs" {
     var supervisor = Self.initForTesting(testing.allocator);
     defer supervisor.deinit();
 
@@ -137,8 +140,8 @@ test "openat without O_CREAT on missing file returns ENOENT" {
     const response = try notification.handle(&supervisor);
     const resp = response.to_notif_resp();
 
-    // Should return ENOENT
-    try testing.expectEqual(@intFromEnum(linux.E.NOENT), resp.@"error");
+    // Read-only opens passthrough to kernel (overlay model)
+    try testing.expectEqual(linux.SECCOMP.USER_NOTIF_FLAG_CONTINUE, resp.flags);
 }
 
 test "write to virtual FD returns bytes written" {
@@ -213,13 +216,13 @@ test "write to stderr (fd=2) passthroughs" {
     try testing.expectEqual(linux.SECCOMP.USER_NOTIF_FLAG_CONTINUE, resp.flags);
 }
 
-test "write to bad FD returns EBADF" {
+test "write to unknown FD passthroughs" {
     var supervisor = Self.initForTesting(testing.allocator);
     defer supervisor.deinit();
 
     const write_buf = "hello";
     const notif = makeNotif(.write, .{
-        .arg0 = 999, // bad FD
+        .arg0 = 999, // unknown FD
         .arg1 = @intFromPtr(write_buf.ptr),
         .arg2 = 5,
     });
@@ -228,8 +231,8 @@ test "write to bad FD returns EBADF" {
     const response = try notification.handle(&supervisor);
     const resp = response.to_notif_resp();
 
-    // Should return EBADF
-    try testing.expectEqual(@intFromEnum(linux.E.BADF), resp.@"error");
+    // Unknown FDs passthrough to kernel (overlay model)
+    try testing.expectEqual(linux.SECCOMP.USER_NOTIF_FLAG_CONTINUE, resp.flags);
 }
 
 test "close virtual FD returns success" {
@@ -353,13 +356,13 @@ test "read from stdin (fd=0) passthroughs" {
     try testing.expectEqual(linux.SECCOMP.USER_NOTIF_FLAG_CONTINUE, resp.flags);
 }
 
-test "read from bad FD returns EBADF" {
+test "read from unknown FD passthroughs" {
     var supervisor = Self.initForTesting(testing.allocator);
     defer supervisor.deinit();
 
     var read_buf: [32]u8 = undefined;
     const notif = makeNotif(.read, .{
-        .arg0 = 999, // bad FD
+        .arg0 = 999, // unknown FD
         .arg1 = @intFromPtr(&read_buf),
         .arg2 = 32,
     });
@@ -368,6 +371,6 @@ test "read from bad FD returns EBADF" {
     const response = try notification.handle(&supervisor);
     const resp = response.to_notif_resp();
 
-    // Should return EBADF
-    try testing.expectEqual(@intFromEnum(linux.E.BADF), resp.@"error");
+    // Unknown FDs passthrough to kernel (overlay model)
+    try testing.expectEqual(linux.SECCOMP.USER_NOTIF_FLAG_CONTINUE, resp.flags);
 }

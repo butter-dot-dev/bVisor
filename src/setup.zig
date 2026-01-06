@@ -8,6 +8,26 @@ const MemoryBridge = types.MemoryBridge;
 const Logger = types.Logger;
 const Supervisor = @import("supervisor.zig");
 
+/// Run an external command in the sandbox
+pub fn runCommand(argv: []const [:0]const u8) !void {
+    const socket_pair: [2]FD = try posix.socketpair(
+        linux.AF.UNIX,
+        linux.SOCK.STREAM,
+        0,
+    );
+    const child_sock: FD, const supervisor_sock: FD = socket_pair;
+
+    const fork_result = try std.posix.fork();
+    if (fork_result == 0) {
+        posix.close(supervisor_sock);
+        try child_process_exec(child_sock, argv);
+    } else {
+        posix.close(child_sock);
+        const child_pid: linux.pid_t = fork_result;
+        try supervisor_process(supervisor_sock, child_pid);
+    }
+}
+
 pub fn run(runnable: *const fn (io: std.Io) void) !void {
     // Create socket pair for child and supervisor
     // To allow inter-process communication
@@ -114,6 +134,64 @@ fn child_process(socket: FD, runnable: *const fn (io: std.Io) void) !void {
     // Now we just run some other process!
     // Shell out to bash with cmd in the future
     @call(.never_inline, runnable, .{io});
+}
+
+fn child_process_exec(socket: FD, argv: []const [:0]const u8) !void {
+    const logger = Logger.init(.child);
+    logger.log("Child process starting (exec mode)", .{});
+
+    // Predict the FD that seccomp will use
+    const next_fd: FD = try posix.dup(0);
+    posix.close(next_fd);
+
+    // Send to supervisor then close socket
+    var fd_bytes: [4]u8 = undefined;
+    std.mem.writeInt(FD, &fd_bytes, next_fd, .little);
+    _ = try posix.write(socket, &fd_bytes);
+
+    // Set "No New Privileges" mode
+    _ = try posix.prctl(posix.PR.SET_NO_NEW_PRIVS, .{ 1, 0, 0, 0 });
+    logger.log("Privilege elevation locked", .{});
+
+    // BPF program to intercept all syscalls
+    var instructions = [_]BPFInstruction{
+        .{ .code = linux.BPF.RET | linux.BPF.K, .jt = 0, .jf = 0, .k = linux.SECCOMP.RET.USER_NOTIF },
+    };
+    var prog = BPFFilterProgram{
+        .len = instructions.len,
+        .filter = &instructions,
+    };
+
+    logger.log("Entering seccomp mode", .{});
+
+    // Install program using seccomp
+    const notify_fd: FD = try Result(FD).from(
+        linux.seccomp(
+            linux.SECCOMP.SET_MODE_FILTER,
+            linux.SECCOMP.FILTER_FLAG.NEW_LISTENER,
+            @ptrCast(&prog),
+        ),
+    ).unwrap();
+
+    // Verify prediction was correct
+    if (notify_fd != next_fd) {
+        return error.PredictionFailed;
+    }
+
+    // Convert argv to null-terminated array for execve
+    var argv_buf: [64:null]?[*:0]const u8 = undefined;
+    for (argv, 0..) |arg, i| {
+        if (i >= 64) break;
+        argv_buf[i] = arg.ptr;
+    }
+    argv_buf[argv.len] = null;
+
+    logger.log("Executing command: {s}", .{argv[0]});
+
+    // execve replaces the current process - doesn't return on success
+    const envp: [*:null]const ?[*:0]const u8 = @ptrCast(std.os.environ.ptr);
+    const err = posix.execveZ(argv_buf[0].?, &argv_buf, envp);
+    std.debug.print("execve failed: {}\n", .{err});
 }
 
 fn supervisor_process(socket: FD, child_pid: linux.pid_t) !void {
