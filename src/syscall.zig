@@ -3,6 +3,7 @@ const linux = std.os.linux;
 const types = @import("./types.zig");
 const MemoryBridge = @import("memory_bridge.zig").MemoryBridge;
 const Logger = types.Logger;
+const Supervisor = @import("Supervisor.zig");
 
 // All supported syscalls
 const ClockNanosleep = @import("./syscalls/ClockNanosleep.zig");
@@ -42,7 +43,7 @@ pub const Syscall = union(enum) {
     }
 
     /// Handle the syscall, passing supervisor for access to mem_bridge, logger, filesystem
-    pub fn handle(self: Self, supervisor: anytype) !Self.Result {
+    pub fn handle(self: Self, supervisor: *Supervisor) !Self.Result {
         return switch (self) {
             inline else => |inner| inner.handle(supervisor),
         };

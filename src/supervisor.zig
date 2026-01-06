@@ -15,13 +15,17 @@ const Self = @This();
 notify_fd: FD,
 child_pid: linux.pid_t,
 logger: Logger,
+allocator: std.mem.Allocator,
+io: std.Io,
 mem_bridge: MemoryBridge,
 filesystem: VirtualFileSystem,
 
-pub fn init(notify_fd: FD, child_pid: linux.pid_t, allocator: std.mem.Allocator) Self {
+pub fn init(notify_fd: FD, child_pid: linux.pid_t, allocator: std.mem.Allocator, io: std.Io) Self {
     return .{
         .notify_fd = notify_fd,
         .child_pid = child_pid,
+        .allocator = allocator,
+        .io = io,
         .logger = Logger.init(.supervisor),
         .mem_bridge = MemoryBridge.init(child_pid),
         .filesystem = VirtualFileSystem.init(allocator),

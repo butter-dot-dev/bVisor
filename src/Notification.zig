@@ -4,6 +4,7 @@ const types = @import("types.zig");
 const MemoryBridge = @import("memory_bridge.zig").MemoryBridge;
 const Logger = types.Logger;
 const Syscall = @import("syscall.zig").Syscall;
+const Supervisor = @import("Supervisor.zig");
 
 /// Notification is a wrapper around linux.SECCOMP.notif
 const Self = @This();
@@ -37,8 +38,7 @@ pub fn from_notif(mem_bridge: MemoryBridge, notif: linux.SECCOMP.notif) !Self {
 }
 
 /// Invoke the handler, or perform passthrough
-/// supervisor: pointer to Supervisor (using anytype to avoid circular import)
-pub fn handle(self: Self, supervisor: anytype) !Response {
+pub fn handle(self: Self, supervisor: *Supervisor) !Response {
     switch (self.action) {
         .passthrough => |sys_code| {
             supervisor.logger.log("Syscall: passthrough: {s}", .{@tagName(sys_code)});

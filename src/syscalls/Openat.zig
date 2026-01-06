@@ -2,6 +2,7 @@ const std = @import("std");
 const linux = std.os.linux;
 const types = @import("../types.zig");
 const MemoryBridge = @import("../memory_bridge.zig").MemoryBridge;
+const Supervisor = @import("../Supervisor.zig");
 const FD = types.FD;
 const Result = @import("../syscall.zig").Syscall.Result;
 
@@ -41,7 +42,7 @@ pub fn parse(mem_bridge: MemoryBridge, notif: linux.SECCOMP.notif) !Self {
     return self;
 }
 
-pub fn handle(self: Self, supervisor: anytype) !Result {
+pub fn handle(self: Self, supervisor: *Supervisor) !Result {
     const logger = supervisor.logger;
     const filesystem = &supervisor.filesystem;
 
@@ -60,7 +61,7 @@ pub fn handle(self: Self, supervisor: anytype) !Result {
     // Check if file exists in VFS first
     if (filesystem.virtualPathExists(path)) {
         // File in VFS - always use VFS
-        const fd = filesystem.open(path, self.flags, self.mode) catch |err| {
+        const fd = filesystem.open(path, self.flags, self.mode, null) catch |err| {
             logger.log("openat: VFS open failed: {}", .{err});
             return switch (err) {
                 error.PermissionDenied => .{ .handled = Result.Handled.err(.ACCES) },
@@ -79,9 +80,23 @@ pub fn handle(self: Self, supervisor: anytype) !Result {
         return .{ .passthrough = {} };
     }
 
-    // Writing - create in VFS (COW: copy from host if exists)
-    // TODO: Copy existing file content from host using pidfd_getfd
-    const fd = filesystem.open(path, self.flags, self.mode) catch |err| {
+    // Writing - COW: try to read existing host file content
+    var host_content: ?[]const u8 = null;
+    var host_mode: u32 = self.mode;
+    var content_buf: [4096]u8 = undefined;
+
+    if (std.fs.openFileAbsolute(path, .{})) |host_file| {
+        defer host_file.close();
+        const stat = host_file.stat() catch null;
+        if (stat) |s| host_mode = @truncate(s.mode);
+        const bytes_read = host_file.readAll(&content_buf) catch 0;
+        if (bytes_read > 0) host_content = content_buf[0..bytes_read];
+        logger.log("openat: COW read {d} bytes from host", .{bytes_read});
+    } else |_| {
+        logger.log("openat: host file not found, creating empty", .{});
+    }
+
+    const fd = filesystem.open(path, self.flags, host_mode, host_content) catch |err| {
         logger.log("openat: VFS create failed: {}", .{err});
         return switch (err) {
             error.PermissionDenied => .{ .handled = Result.Handled.err(.ACCES) },

@@ -33,6 +33,7 @@ pub fn init(allocator: std.mem.Allocator) Self {
 }
 
 pub fn deinit(self: *Self) void {
+    // Free allocated paths tracked in open_fds
     var fd_it = self.open_fds.iterator();
     while (fd_it.next()) |entry| {
         switch (entry.value_ptr.*) {
@@ -41,6 +42,15 @@ pub fn deinit(self: *Self) void {
         }
     }
     self.open_fds.deinit();
+
+    // Free allocated virtual files
+    var file_it = self.virtual_files.iterator();
+    while (file_it.next()) |entry| {
+        entry.value_ptr.*.data.deinit(self.allocator);
+        self.allocator.destroy(entry.value_ptr.*);
+        self.allocator.free(entry.key_ptr.*);
+    }
+    self.virtual_files.deinit();
 
     // Debug: dump VFS contents (skip in tests)
     if (!builtin.is_test and self.virtual_files.count() > 0) {
@@ -60,17 +70,10 @@ pub fn deinit(self: *Self) void {
         }
         std.debug.print("\x1b[93m===================================\x1b[0m\n\n", .{});
     }
-
-    var it = self.virtual_files.iterator();
-    while (it.next()) |entry| {
-        entry.value_ptr.*.data.deinit(self.allocator);
-        self.allocator.destroy(entry.value_ptr.*);
-        self.allocator.free(entry.key_ptr.*);
-    }
-    self.virtual_files.deinit();
 }
 
-pub fn open(self: *Self, path: []const u8, flags: u32, mode: u32) !FD {
+/// Open or create a file. Pass content for COW from host.
+pub fn open(self: *Self, path: []const u8, flags: u32, mode: u32, content: ?[]const u8) !FD {
     const access_mode = flags & O_ACCMODE;
     var file: *VirtualFile = undefined;
     if (self.virtual_files.get(path)) |existing| {
@@ -91,10 +94,11 @@ pub fn open(self: *Self, path: []const u8, flags: u32, mode: u32) !FD {
             file.data.clearRetainingCapacity();
         }
     } else {
-        if ((flags & O_CREAT) == 0) return error.FileNotFound;
+        if ((flags & O_CREAT) == 0 and content == null) return error.FileNotFound;
 
         const new_file = try self.allocator.create(VirtualFile);
         new_file.* = .{ .mode = mode & 0o777 };
+        if (content) |c| try new_file.data.appendSlice(self.allocator, c);
         const owned_path = try self.allocator.dupe(u8, path);
         try self.virtual_files.put(owned_path, new_file);
         file = new_file;
@@ -212,7 +216,7 @@ test "open and write" {
     var vfs = Self.init(std.testing.allocator);
     defer vfs.deinit();
 
-    const fd = try vfs.open("/test.txt", O_WRONLY | O_CREAT, 0o644);
+    const fd = try vfs.open("/test.txt", O_WRONLY | O_CREAT, 0o644, null);
     const written = try vfs.write(fd, "hello");
     try std.testing.expectEqual(5, written);
 }
@@ -222,12 +226,12 @@ test "persitence: open, write, close, reopen, read" {
     defer vfs.deinit();
 
     // Write and close
-    const fd1 = try vfs.open("/test.txt", O_WRONLY | O_CREAT, 0o644);
+    const fd1 = try vfs.open("/test.txt", O_WRONLY | O_CREAT, 0o644, null);
     _ = try vfs.write(fd1, "persistent data");
     vfs.close(fd1);
 
     // Reopen and read
-    const fd2 = try vfs.open("/test.txt", O_RDONLY, 0o644);
+    const fd2 = try vfs.open("/test.txt", O_RDONLY, 0o644, null);
     var buf: [32]u8 = undefined;
     const n = try vfs.read(fd2, &buf);
     try std.testing.expectEqualStrings("persistent data", buf[0..n]);
@@ -237,7 +241,7 @@ test "file not found without O_CREAT" {
     var vfs = Self.init(std.testing.allocator);
     defer vfs.deinit();
 
-    const result = vfs.open("/nonexistent.txt", O_RDONLY, 0o644);
+    const result = vfs.open("/nonexistent.txt", O_RDONLY, 0o644, null);
     try std.testing.expectError(error.FileNotFound, result);
 }
 
@@ -268,7 +272,7 @@ test "getFDBackend" {
     try std.testing.expect(vfs.getFDBackend(2) == null);
 
     // Open a file, check it's virtual
-    const fd = try vfs.open("/test.txt", O_WRONLY | O_CREAT, 0o644);
+    const fd = try vfs.open("/test.txt", O_WRONLY | O_CREAT, 0o644, null);
     try std.testing.expect(vfs.getFDBackend(fd).? == .virtual);
 
     // Close it, no longer tracked
@@ -281,11 +285,11 @@ test "permission denied - read-only file, open for write" {
     defer vfs.deinit();
 
     // Create read-only file
-    const fd1 = try vfs.open("/readonly.txt", O_WRONLY | O_CREAT, 0o400);
+    const fd1 = try vfs.open("/readonly.txt", O_WRONLY | O_CREAT, 0o400, null);
     vfs.close(fd1);
 
     // Try to open for writing
-    const result = vfs.open("/readonly.txt", O_WRONLY, 0o400);
+    const result = vfs.open("/readonly.txt", O_WRONLY, 0o400, null);
     try std.testing.expectError(error.PermissionDenied, result);
 }
 
@@ -294,11 +298,11 @@ test "permission denied - write-only file, open for read" {
     defer vfs.deinit();
 
     // Create write-only file
-    const fd1 = try vfs.open("/writeonly.txt", O_WRONLY | O_CREAT, 0o200);
+    const fd1 = try vfs.open("/writeonly.txt", O_WRONLY | O_CREAT, 0o200, null);
     vfs.close(fd1);
 
     // Try to open for reading
-    const result = vfs.open("/writeonly.txt", O_RDONLY, 0o200);
+    const result = vfs.open("/writeonly.txt", O_RDONLY, 0o200, null);
     try std.testing.expectError(error.PermissionDenied, result);
 }
 
@@ -307,15 +311,15 @@ test "permission denied - no permissions" {
     defer vfs.deinit();
 
     // Create file with no permissions
-    const fd1 = try vfs.open("/noperm.txt", O_WRONLY | O_CREAT, 0o000);
+    const fd1 = try vfs.open("/noperm.txt", O_WRONLY | O_CREAT, 0o000, null);
     vfs.close(fd1);
 
     // Can't read
-    try std.testing.expectError(error.PermissionDenied, vfs.open("/noperm.txt", O_RDONLY, 0));
+    try std.testing.expectError(error.PermissionDenied, vfs.open("/noperm.txt", O_RDONLY, 0, null));
     // Can't write
-    try std.testing.expectError(error.PermissionDenied, vfs.open("/noperm.txt", O_WRONLY, 0));
+    try std.testing.expectError(error.PermissionDenied, vfs.open("/noperm.txt", O_WRONLY, 0, null));
     // Can't read-write
-    try std.testing.expectError(error.PermissionDenied, vfs.open("/noperm.txt", O_RDWR, 0));
+    try std.testing.expectError(error.PermissionDenied, vfs.open("/noperm.txt", O_RDWR, 0, null));
 }
 
 test "permission denied - O_RDWR needs both bits" {
@@ -323,18 +327,18 @@ test "permission denied - O_RDWR needs both bits" {
     defer vfs.deinit();
 
     // Create read-only file
-    const fd1 = try vfs.open("/ro.txt", O_WRONLY | O_CREAT, 0o400);
+    const fd1 = try vfs.open("/ro.txt", O_WRONLY | O_CREAT, 0o400, null);
     vfs.close(fd1);
 
     // O_RDWR should fail (missing write permission)
-    try std.testing.expectError(error.PermissionDenied, vfs.open("/ro.txt", O_RDWR, 0));
+    try std.testing.expectError(error.PermissionDenied, vfs.open("/ro.txt", O_RDWR, 0, null));
 
     // Create write-only file
-    const fd2 = try vfs.open("/wo.txt", O_WRONLY | O_CREAT, 0o200);
+    const fd2 = try vfs.open("/wo.txt", O_WRONLY | O_CREAT, 0o200, null);
     vfs.close(fd2);
 
     // O_RDWR should fail (missing read permission)
-    try std.testing.expectError(error.PermissionDenied, vfs.open("/wo.txt", O_RDWR, 0));
+    try std.testing.expectError(error.PermissionDenied, vfs.open("/wo.txt", O_RDWR, 0, null));
 }
 
 test "write to read-only FD" {
@@ -342,12 +346,12 @@ test "write to read-only FD" {
     defer vfs.deinit();
 
     // Create file with rw permissions
-    const fd1 = try vfs.open("/test.txt", O_WRONLY | O_CREAT, 0o644);
+    const fd1 = try vfs.open("/test.txt", O_WRONLY | O_CREAT, 0o644, null);
     _ = try vfs.write(fd1, "data");
     vfs.close(fd1);
 
     // Open read-only
-    const fd2 = try vfs.open("/test.txt", O_RDONLY, 0);
+    const fd2 = try vfs.open("/test.txt", O_RDONLY, 0, null);
     const result = vfs.write(fd2, "more");
     try std.testing.expectError(error.NotOpenForWriting, result);
 }
@@ -356,7 +360,7 @@ test "read from write-only FD" {
     var vfs = Self.init(std.testing.allocator);
     defer vfs.deinit();
 
-    const fd = try vfs.open("/test.txt", O_WRONLY | O_CREAT, 0o644);
+    const fd = try vfs.open("/test.txt", O_WRONLY | O_CREAT, 0o644, null);
     var buf: [32]u8 = undefined;
     const result = vfs.read(fd, &buf);
     try std.testing.expectError(error.NotOpenForReading, result);
@@ -367,17 +371,17 @@ test "O_TRUNC truncates existing file" {
     defer vfs.deinit();
 
     // Create and write
-    const fd1 = try vfs.open("/test.txt", O_WRONLY | O_CREAT, 0o644);
+    const fd1 = try vfs.open("/test.txt", O_WRONLY | O_CREAT, 0o644, null);
     _ = try vfs.write(fd1, "original content");
     vfs.close(fd1);
 
     // Reopen with O_TRUNC
-    const fd2 = try vfs.open("/test.txt", O_RDWR | O_TRUNC, 0);
+    const fd2 = try vfs.open("/test.txt", O_RDWR | O_TRUNC, 0, null);
     _ = try vfs.write(fd2, "new");
     vfs.close(fd2);
 
     // Read back
-    const fd3 = try vfs.open("/test.txt", O_RDONLY, 0);
+    const fd3 = try vfs.open("/test.txt", O_RDONLY, 0, null);
     var buf: [32]u8 = undefined;
     const n = try vfs.read(fd3, &buf);
     try std.testing.expectEqualStrings("new", buf[0..n]);
@@ -388,13 +392,13 @@ test "multiple FDs same file have independent offsets" {
     defer vfs.deinit();
 
     // Create file with content
-    const fd1 = try vfs.open("/test.txt", O_WRONLY | O_CREAT, 0o644);
+    const fd1 = try vfs.open("/test.txt", O_WRONLY | O_CREAT, 0o644, null);
     _ = try vfs.write(fd1, "abcdefghij");
     vfs.close(fd1);
 
     // Open twice for reading
-    const fd2 = try vfs.open("/test.txt", O_RDONLY, 0);
-    const fd3 = try vfs.open("/test.txt", O_RDONLY, 0);
+    const fd2 = try vfs.open("/test.txt", O_RDONLY, 0, null);
+    const fd3 = try vfs.open("/test.txt", O_RDONLY, 0, null);
 
     var buf2: [3]u8 = undefined;
     var buf3: [5]u8 = undefined;
@@ -416,11 +420,11 @@ test "read at EOF returns 0" {
     var vfs = Self.init(std.testing.allocator);
     defer vfs.deinit();
 
-    const fd1 = try vfs.open("/test.txt", O_WRONLY | O_CREAT, 0o644);
+    const fd1 = try vfs.open("/test.txt", O_WRONLY | O_CREAT, 0o644, null);
     _ = try vfs.write(fd1, "short");
     vfs.close(fd1);
 
-    const fd2 = try vfs.open("/test.txt", O_RDONLY, 0);
+    const fd2 = try vfs.open("/test.txt", O_RDONLY, 0, null);
     var buf: [32]u8 = undefined;
 
     // Read all
@@ -436,7 +440,7 @@ test "O_RDWR allows both read and write" {
     var vfs = Self.init(std.testing.allocator);
     defer vfs.deinit();
 
-    const fd = try vfs.open("/test.txt", O_RDWR | O_CREAT, 0o644);
+    const fd = try vfs.open("/test.txt", O_RDWR | O_CREAT, 0o644, null);
 
     // Write should work
     const written = try vfs.write(fd, "hello");

@@ -6,7 +6,7 @@ const FD = types.FD;
 const Result = types.LinuxResult;
 const MemoryBridge = types.MemoryBridge;
 const Logger = types.Logger;
-const Supervisor = @import("supervisor.zig");
+const Supervisor = @import("Supervisor.zig");
 
 /// Run an external command in the sandbox
 pub fn runCommand(argv: []const [:0]const u8) !void {
@@ -248,7 +248,7 @@ fn supervisor_process(socket: FD, child_pid: linux.pid_t) !void {
         return error.PidfdGetfdFailed;
     }
 
-    var supervisor = Supervisor.init(notify_fd, child_pid, gpa);
+    var supervisor = Supervisor.init(notify_fd, child_pid, gpa, io);
     defer supervisor.deinit();
     try supervisor.run();
 }

@@ -4,6 +4,7 @@ const types = @import("../types.zig");
 const MemoryBridge = @import("../memory_bridge.zig").MemoryBridge;
 const FD = types.FD;
 const Result = @import("../syscall.zig").Syscall.Result;
+const Supervisor = @import("../Supervisor.zig");
 
 const Self = @This();
 
@@ -16,7 +17,7 @@ pub fn parse(mem_bridge: MemoryBridge, notif: linux.SECCOMP.notif) !Self {
     };
 }
 
-pub fn handle(self: Self, supervisor: anytype) !Result {
+pub fn handle(self: Self, supervisor: *Supervisor) !Result {
     const logger = supervisor.logger;
     const filesystem = &supervisor.filesystem;
 
