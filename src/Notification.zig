@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
 const types = @import("types.zig");
-const MemoryBridge = types.MemoryBridge;
+const MemoryBridge = @import("memory_bridge.zig").MemoryBridge;
 const Logger = types.Logger;
 const Syscall = @import("syscall.zig").Syscall;
 
@@ -37,14 +37,15 @@ pub fn from_notif(mem_bridge: MemoryBridge, notif: linux.SECCOMP.notif) !Self {
 }
 
 /// Invoke the handler, or perform passthrough
-pub fn handle(self: Self, mem_bridge: MemoryBridge, logger: Logger) !Response {
+/// supervisor: pointer to Supervisor (using anytype to avoid circular import)
+pub fn handle(self: Self, supervisor: anytype) !Response {
     switch (self.action) {
         .passthrough => |sys_code| {
-            logger.log("Syscall: passthrough: {s}", .{@tagName(sys_code)});
+            supervisor.logger.log("Syscall: passthrough: {s}", .{@tagName(sys_code)});
             return Response.Passthrough(self.id);
         },
         .emulate => |syscall| {
-            const result = try syscall.handle(mem_bridge, logger);
+            const result = try syscall.handle(supervisor);
             return Response.Emulated(self.id, result);
         },
     }
@@ -80,11 +81,21 @@ pub const Response = struct {
                 .val = 0,
                 .@"error" = 0,
             },
-            .emulated => |emulated| .{
-                .id = self.id,
-                .flags = 0,
-                .val = emulated.val,
-                .@"error" = emulated.errno,
+            .emulated => |result| switch (result) {
+                // Handler decided to passthrough at runtime
+                .passthrough => .{
+                    .id = self.id,
+                    .flags = linux.SECCOMP.USER_NOTIF_FLAG_CONTINUE,
+                    .val = 0,
+                    .@"error" = 0,
+                },
+                // Handler emulated the syscall
+                .handled => |h| .{
+                    .id = self.id,
+                    .flags = 0,
+                    .val = h.val,
+                    .@"error" = h.errno,
+                },
             },
         };
     }

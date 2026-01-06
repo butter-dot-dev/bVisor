@@ -170,6 +170,7 @@ fn supervisor_process(socket: FD, child_pid: linux.pid_t) !void {
         return error.PidfdGetfdFailed;
     }
 
-    const supervisor = Supervisor.init(notify_fd, child_pid);
+    var supervisor = Supervisor.init(notify_fd, child_pid, gpa);
+    defer supervisor.deinit();
     try supervisor.run();
 }

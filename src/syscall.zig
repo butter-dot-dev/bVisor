@@ -1,15 +1,23 @@
 const std = @import("std");
 const linux = std.os.linux;
 const types = @import("./types.zig");
-const MemoryBridge = types.MemoryBridge;
+const MemoryBridge = @import("memory_bridge.zig").MemoryBridge;
 const Logger = types.Logger;
 
 // All supported syscalls
 const ClockNanosleep = @import("./syscalls/ClockNanosleep.zig");
+const Openat = @import("./syscalls/Openat.zig");
+const Writev = @import("./syscalls/Writev.zig");
+const Write = @import("./syscalls/Write.zig");
+const Close = @import("./syscalls/Close.zig");
 
 /// Union of all emulated syscalls.
 pub const Syscall = union(enum) {
     clock_nanosleep: ClockNanosleep,
+    openat: Openat,
+    writev: Writev,
+    write: Write,
+    close: Close,
 
     const Self = @This();
 
@@ -19,26 +27,36 @@ pub const Syscall = union(enum) {
         const sys_code: linux.SYS = @enumFromInt(notif.data.nr);
         switch (sys_code) {
             .clock_nanosleep => return .{ .clock_nanosleep = try ClockNanosleep.parse(mem_bridge, notif) },
+            .openat => return .{ .openat = try Openat.parse(mem_bridge, notif) },
+            .writev => return .{ .writev = try Writev.parse(mem_bridge, notif) },
+            .write => return .{ .write = try Write.parse(mem_bridge, notif) },
+            .close => return .{ .close = try Close.parse(mem_bridge, notif) },
             else => return null,
         }
     }
 
-    pub fn handle(self: Self, mem_bridge: MemoryBridge, logger: Logger) !Self.Result {
+    /// Handle the syscall, passing supervisor for access to mem_bridge, logger, filesystem
+    pub fn handle(self: Self, supervisor: anytype) !Self.Result {
         return switch (self) {
-            inline else => |inner| inner.handle(mem_bridge, logger),
+            inline else => |inner| inner.handle(supervisor),
         };
     }
 
-    pub const Result = struct {
-        val: i64,
-        errno: i32,
+    pub const Result = union(enum) {
+        passthrough: void, // If the handler implementation decided to passthrough
+        handled: Handled,
 
-        pub fn success(val: i64) @This() {
-            return .{ .val = val, .errno = 0 };
-        }
+        pub const Handled = struct {
+            val: i64,
+            errno: i32,
 
-        pub fn err(errno: linux.E) @This() {
-            return .{ .val = 0, .errno = @intFromEnum(errno) };
-        }
+            pub fn success(val: i64) @This() {
+                return .{ .val = val, .errno = 0 };
+            }
+
+            pub fn err(errno: linux.E) @This() {
+                return .{ .val = 0, .errno = @intFromEnum(errno) };
+            }
+        };
     };
 };
