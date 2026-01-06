@@ -29,7 +29,7 @@ Seccomp only works on Linux. To test on macOS, use Docker:
 
 ```bash
 zig build
-docker run --rm -v ./zig-out:/zig-out alpine /zig-out/bin/bVisor
+docker run --rm -v ./zig-out:/zig-out alpine /zig-out/bin/bVisor /bin/bash -c "echo 'Hello, World!' > /test.txt"
 # Inside container: /zig-out/bin/bVisor
 ```
 
@@ -113,6 +113,9 @@ test {
 - Use the installed ZLS language server for up-to-date feedback on 0.16 features. 
 - Where possible, keep structs as individual files, using the file-as-struct pattern with `const Self = @This()`.
 - Prefer the `try` keyword over `catch` when possible.
+- Prefer enums with switches for dynamic dispatch. Inline else to enforce that all enum variants contain methods of a certain signature (see syscall.zig for ref).
+- Use dependency injection where possible to help keep testing free of IO and side effects.
+- Avoid duplicate naming like Notification and NotificationResponse. In that case, nest Notification and Notification.Response.
 - Prefer to use stack buffers over heap allocation when possible.
 - PascalCase for types (and functions returning types), snake_case for variables, camelCase for functions.
 - Use init(...) as constructor, and a deferrable deinit(...) if destructor is needed.
