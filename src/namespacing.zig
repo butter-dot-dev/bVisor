@@ -33,6 +33,7 @@ const VirtualProc = struct {
     }
 
     fn deinit(self: *Self, allocator: Allocator) void {
+        self.children.deinit(allocator);
         allocator.destroy(self);
     }
 
@@ -90,10 +91,7 @@ const VirtualProc = struct {
     }
 
     pub fn next_pid(self: *Self, allocator: Allocator) !VirtualPID {
-        std.debug.print("collecting tree pids\n", .{});
-        std.debug.print("self.pid: {}\n", .{self.pid});
         const pids = try self.collect_tree_pids_sorted_owned(allocator);
-        std.debug.print("pids: {any}\n", .{pids});
         defer allocator.free(pids);
         if (pids.len == 0) return 1;
         // find first gap using windows
@@ -125,7 +123,7 @@ const VirtualProc = struct {
 };
 
 const FlatMap = struct {
-    arena: ArenaAllocator,
+    allocator: Allocator,
 
     // flat list of mappings from kernel to virtual PID
     // the VirtualProc pointed to may be arbitrarily nested
@@ -135,12 +133,16 @@ const FlatMap = struct {
 
     pub fn init(allocator: Allocator) Self {
         return .{
-            .arena = .init(allocator),
+            .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *Self) void {
-        self.arena.deinit(); // frees every VirtualProc in procs, as they're all descendent from this arena
+        var iter = self.procs.iterator();
+        while (iter.next()) |entry| {
+            entry.value_ptr.*.deinit(self.allocator);
+        }
+        self.procs.deinit(self.allocator);
     }
 
     /// Called once on sandbox startup, to track the initial process virtually
@@ -148,41 +150,36 @@ const FlatMap = struct {
         // should only ever happen once on sandbox boot. We don't allow new top-level processes, only cloned children.
         if (self.procs.size != 0) return error.InitialProcessExists;
 
-        const allocator = self.arena.allocator();
-
         const vpid = 1; // initial virtual PID always starts at 1
         const initial = try VirtualProc.init(
-            allocator,
+            self.allocator,
             vpid,
             null,
         );
-        errdefer initial.deinit(allocator);
+        errdefer initial.deinit(self.allocator);
 
-        try self.procs.put(allocator, pid, initial);
+        try self.procs.put(self.allocator, pid, initial);
 
         return vpid;
     }
 
     pub fn register_child_proc(self: *Self, parent_pid: KernelPID, child_pid: KernelPID) !VirtualPID {
-        const allocator = self.arena.allocator();
         const parent: *VirtualProc = self.procs.get(parent_pid) orelse return error.KernelPIDNotFound;
-        const child = try parent.init_child(allocator);
-        errdefer parent.deinit_child(child, allocator);
+        const child = try parent.init_child(self.allocator);
+        errdefer parent.deinit_child(child, self.allocator);
 
-        try self.procs.put(allocator, child_pid, child);
+        try self.procs.put(self.allocator, child_pid, child);
 
         return child.pid;
     }
 
     pub fn kill_proc(self: *Self, pid: KernelPID) !void {
-        const allocator = self.arena.allocator();
-
         var target_proc = self.procs.get(pid) orelse return;
         const parent = target_proc.parent;
 
         // collect all descendents
-        var procs_to_delete = try target_proc.collect_tree_owned(allocator);
-        defer allocator.free(procs_to_delete);
+        var procs_to_delete = try target_proc.collect_tree_owned(self.allocator);
+        defer self.allocator.free(procs_to_delete);
 
         // remove target from parent's children
         if (parent) |parent_proc| {
@@ -190,13 +187,13 @@ const FlatMap = struct {
         }
 
         // remove mappings from procs
-        var kernel_pids_to_remove = try std.ArrayList(KernelPID).initCapacity(allocator, procs_to_delete.len);
-        defer kernel_pids_to_remove.deinit(allocator);
+        var kernel_pids_to_remove = try std.ArrayList(KernelPID).initCapacity(self.allocator, procs_to_delete.len);
+        defer kernel_pids_to_remove.deinit(self.allocator);
         for (procs_to_delete) |child| {
             var iter = self.procs.iterator();
             while (iter.next()) |entry| {
                 if (entry.value_ptr.* == child) {
-                    try kernel_pids_to_remove.append(allocator, entry.key_ptr.*);
+                    try kernel_pids_to_remove.append(self.allocator, entry.key_ptr.*);
                 }
             }
         }
@@ -206,7 +203,7 @@ const FlatMap = struct {
 
         // mass-deinit items
         for (procs_to_delete) |proc| {
-            proc.deinit(allocator);
+            proc.deinit(self.allocator);
         }
     }
 };
