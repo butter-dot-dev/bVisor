@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const linux = std.os.linux;
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
+const assert = std.debug.assert;
 
 const FD = union { kernel: KernelFD, virtual: VirtualFD };
 const VirtualFD = linux.fd_t;
@@ -17,16 +18,56 @@ const VirtualProcSet = std.AutoHashMapUnmanaged(*VirtualProc, void);
 const VirtualProcList = std.ArrayList(*VirtualProc);
 
 const VirtualProc = struct {
-    const Self = @This();
-
-    pid: VirtualPID,
+    role: NamespaceRole,
     parent: ?*VirtualProc,
     children: VirtualProcSet = .empty,
 
-    fn init(allocator: Allocator, pid: VirtualPID, parent: ?*VirtualProc) !*Self {
+    const Self = @This();
+
+    const RoleTag = enum {
+        namespace_root,
+        child,
+    };
+
+    const NamespaceRole = union(Tag) {
+        root: Root,
+        child: Child,
+
+        pub const Tag = enum {
+            root,
+            child,
+        };
+
+        pub const init_root: @This() = .{ .root = .{} };
+    };
+
+    const Root = struct {
+        // Roots are always virtual PID 1
+        // Roots may be children of other nodes - this denotes a nested namespace boundary
+
+        highest_pid: VirtualPID = 1, // monotonically increasing PID; linux doesn't promise gap-filling, so we don't need to.
+
+        pub fn next_pid(self: *Root) VirtualPID {
+            self.highest_pid += 1;
+            return self.highest_pid;
+        }
+
+        pub inline fn pid(_: *Root) VirtualPID {
+            // roots are implicitly always 1
+            // inlined to avoid extra function call overhead
+            return 1;
+        }
+    };
+
+    const Child = struct {
+        // Children can be any PID except 1
+        pid: VirtualPID,
+    };
+
+    fn init(allocator: Allocator, role: NamespaceRole, parent: ?*VirtualProc) !*Self {
         const self = try allocator.create(Self);
         self.* = .{
-            .pid = pid,
+            .role = role,
             .parent = parent,
         };
         return self;
@@ -37,12 +78,45 @@ const VirtualProc = struct {
         allocator.destroy(self);
     }
 
-    fn init_child(self: *Self, allocator: Allocator) !*Self {
+    pub inline fn pid(self: *Self) VirtualPID {
+        // inlined to avoid extra function call overhead
+        return switch (self.role) {
+            .root => |*root| root.pid(),
+            .child => |*child| child.pid,
+        };
+    }
+
+    /// Walk up the tree until a root is found
+    fn get_namespace_root(self: *Self) !*VirtualProc {
+        if (self.role == .root) {
+            return self;
+        }
+        var current = self;
+        while (current.parent) |parent| {
+            if (parent.role == .root) {
+                return parent;
+            }
+            current = parent;
+        }
+        return error.NoRootFound;
+    }
+
+    fn init_child(self: *Self, allocator: Allocator, role_tag: NamespaceRole.Tag) !*Self {
         // TODO: support different clone flags to determine what gets copied over from parent
+
+        const role: NamespaceRole = switch (role_tag) {
+            .root => .{ .root = .{} },
+            .child => blk: {
+                const root = try self.get_namespace_root();
+                assert(root.role == .root); // crashes program if get_root incorrectly implemented
+                const child_pid = root.role.root.next_pid();
+                break :blk .{ .child = .{ .pid = child_pid } };
+            },
+        };
 
         const child = try VirtualProc.init(
             allocator,
-            try self.next_pid(allocator),
+            role,
             self,
         );
         errdefer child.deinit(allocator);
@@ -61,73 +135,46 @@ const VirtualProc = struct {
         _ = self.children.remove(child);
     }
 
-    /// Collect a flat list of this process and all descendents
-    /// Returned ArrayList must be freed by caller
-    fn collect_tree_owned(self: *Self, allocator: Allocator) ![]*VirtualProc {
-        var accumulator = try VirtualProcList.initCapacity(allocator, 16);
-        try self._collect_tree_recursive(&accumulator, allocator);
-        return accumulator.toOwnedSlice(allocator);
-    }
-
-    fn collect_tree_pids_sorted_owned(self: *Self, allocator: Allocator) ![]VirtualPID {
-        const procs = try self.collect_tree_owned(allocator);
+    /// Get a sorted list of all PIDs in this process's namespace
+    fn get_pids_owned(self: *Self, allocator: Allocator) ![]VirtualPID {
+        const root = try self.get_namespace_root();
+        const procs = try root.collect_subtree_owned(allocator);
         defer allocator.free(procs);
+
         var pids = try std.ArrayList(VirtualPID).initCapacity(allocator, procs.len);
         for (procs) |proc| {
-            try pids.append(allocator, proc.pid);
+            try pids.append(allocator, proc.pid());
         }
-
         std.mem.sort(VirtualPID, pids.items, {}, std.sort.asc(VirtualPID));
         return pids.toOwnedSlice(allocator);
     }
 
-    fn _collect_tree_recursive(self: *Self, accumulator: *VirtualProcList, allocator: Allocator) !void {
+    /// Collect a flat list of this process and all descendents
+    /// Returned ArrayList must be freed by caller
+    fn collect_subtree_owned(self: *Self, allocator: Allocator) ![]*VirtualProc {
+        var accumulator = try VirtualProcList.initCapacity(allocator, 16);
+        try self._collect_subtree_recursive(&accumulator, allocator);
+        return accumulator.toOwnedSlice(allocator);
+    }
+
+    fn _collect_subtree_recursive(self: *Self, accumulator: *VirtualProcList, allocator: Allocator) !void {
         var iter = self.children.iterator();
         while (iter.next()) |child_entry| {
             const child: *VirtualProc = child_entry.key_ptr.*;
-            try child._collect_tree_recursive(accumulator, allocator);
+            try child._collect_subtree_recursive(accumulator, allocator);
         }
         try accumulator.append(allocator, self);
     }
-
-    pub fn next_pid(self: *Self, allocator: Allocator) !VirtualPID {
-        const pids = try self.collect_tree_pids_sorted_owned(allocator);
-        defer allocator.free(pids);
-        if (pids.len == 0) return 1;
-        // find first gap using windows
-        var iter = std.mem.window(VirtualPID, pids, 2, 1);
-        while (iter.next()) |window| {
-            // window can return a partial window
-            // requiring checks for index-out-of-bounds
-            switch (window.len) {
-                0 => unreachable, // window returns null in this case
-                1 => {
-                    // partial window at end of pids slice
-                    return window[0] + 1;
-                },
-                2 => {
-                    // full window in middle of pids slice
-                    // check for gaps
-                    const a = window[0];
-                    const b = window[1];
-                    if (b - a > 1) {
-                        return a + 1;
-                    }
-                },
-                else => unreachable,
-            }
-        }
-
-        return pids[pids.len - 1] + 1; // no gap found, return next after last
-    }
 };
 
-const FlatMap = struct {
+/// Tracks kernel to virtual mappings, handling parent/child relationships
+const VirtualProcesses = struct {
     allocator: Allocator,
 
     // flat list of mappings from kernel to virtual PID
     // the VirtualProc pointed to may be arbitrarily nested
     procs: KernelToVirtualProcMap = .empty,
+    root_proc: ?*VirtualProc = null, // cached initial proc for quick access
 
     const Self = @This();
 
@@ -145,32 +192,35 @@ const FlatMap = struct {
         self.procs.deinit(self.allocator);
     }
 
-    /// Called once on sandbox startup, to track the initial process virtually
-    pub fn register_initial_proc(self: *Self, pid: KernelPID) !VirtualPID {
+    /// Called once on sandbox startup, to track the initial root process virtually
+    pub fn register_root_proc(self: *Self, pid: KernelPID) !VirtualPID {
         // should only ever happen once on sandbox boot. We don't allow new top-level processes, only cloned children.
         if (self.procs.size != 0) return error.InitialProcessExists;
 
-        const vpid = 1; // initial virtual PID always starts at 1
-        const initial = try VirtualProc.init(
+        const proc = try VirtualProc.init(
             self.allocator,
-            vpid,
+            .init_root,
             null,
         );
-        errdefer initial.deinit(self.allocator);
+        errdefer proc.deinit(self.allocator);
+        assert(proc.role == .root);
 
-        try self.procs.put(self.allocator, pid, initial);
+        try self.procs.put(self.allocator, pid, proc);
+        self.root_proc = proc;
 
-        return vpid;
+        return proc.pid();
     }
 
     pub fn register_child_proc(self: *Self, parent_pid: KernelPID, child_pid: KernelPID) !VirtualPID {
+        // TODO: handle different clone cases
+
         const parent: *VirtualProc = self.procs.get(parent_pid) orelse return error.KernelPIDNotFound;
-        const child = try parent.init_child(self.allocator);
+        const child = try parent.init_child(self.allocator, .child);
         errdefer parent.deinit_child(child, self.allocator);
 
         try self.procs.put(self.allocator, child_pid, child);
 
-        return child.pid;
+        return child.pid();
     }
 
     pub fn kill_proc(self: *Self, pid: KernelPID) !void {
@@ -178,7 +228,7 @@ const FlatMap = struct {
         const parent = target_proc.parent;
 
         // collect all descendents
-        var procs_to_delete = try target_proc.collect_tree_owned(self.allocator);
+        var procs_to_delete = try target_proc.collect_subtree_owned(self.allocator);
         defer self.allocator.free(procs_to_delete);
 
         // remove target from parent's children
@@ -209,25 +259,26 @@ const FlatMap = struct {
 };
 
 test "state is correct after initial proc" {
-    var flat_map = FlatMap.init(std.testing.allocator);
+    var flat_map = VirtualProcesses.init(std.testing.allocator);
     defer flat_map.deinit();
     try std.testing.expect(flat_map.procs.count() == 0);
 
     // supervisor spawns child proc of say PID=22, need to register that virtually
     const init_pid = 22;
-    const init_vpid = try flat_map.register_initial_proc(init_pid);
+    const init_vpid = try flat_map.register_root_proc(init_pid);
     try std.testing.expectEqual(1, init_vpid);
     try std.testing.expectEqual(1, flat_map.procs.count());
     const maybe_proc = flat_map.procs.get(init_pid);
     try std.testing.expect(maybe_proc != null);
     const proc = maybe_proc.?;
-    try std.testing.expectEqual(1, proc.pid); // correct virtual PID assignment
+    try std.testing.expectEqual(1, proc.pid()); // correct virtual PID assignment
+    try std.testing.expect(proc.role == .root);
     try std.testing.expectEqual(0, proc.children.size);
 }
 
-test "gaps in pids are re-filled" {
+test "basic tree operations work - add, kill" {
     const allocator = std.testing.allocator;
-    var flat_map = FlatMap.init(allocator);
+    var flat_map = VirtualProcesses.init(allocator);
     defer flat_map.deinit();
     try std.testing.expectEqual(0, flat_map.procs.count());
 
@@ -238,7 +289,7 @@ test "gaps in pids are re-filled" {
     //   - d
 
     const a_pid = 33;
-    const a_vpid = try flat_map.register_initial_proc(a_pid);
+    const a_vpid = try flat_map.register_root_proc(a_pid);
     try std.testing.expectEqual(1, flat_map.procs.count());
     try std.testing.expectEqual(1, a_vpid);
 
@@ -278,20 +329,20 @@ test "gaps in pids are re-filled" {
     try std.testing.expectEqual(null, flat_map.procs.get(b_pid));
 
     // get pids
-    var a_pids = try flat_map.procs.get(a_pid).?.collect_tree_pids_sorted_owned(allocator);
+    var a_pids = try flat_map.procs.get(a_pid).?.get_pids_owned(allocator);
     try std.testing.expectEqual(3, a_pids.len);
     try std.testing.expectEqualSlices(VirtualPID, &[3]VirtualPID{ 1, 3, 4 }, a_pids);
     allocator.free(a_pids); // free immediately, since we reuse a_pids var later
 
-    // re-add b, should get original pid for b since was freed
+    // re-add b, should issue a new vpid 5
     const b_pid_2 = 45;
     const b_vpid_2 = try flat_map.register_child_proc(a_pid, b_pid_2);
-    try std.testing.expectEqual(b_vpid, b_vpid_2);
+    try std.testing.expectEqual(5, b_vpid_2);
 
-    a_pids = try flat_map.procs.get(a_pid).?.collect_tree_pids_sorted_owned(allocator);
+    a_pids = try flat_map.procs.get(a_pid).?.get_pids_owned(allocator);
     defer allocator.free(a_pids);
     try std.testing.expectEqual(4, a_pids.len);
-    try std.testing.expectEqualSlices(VirtualPID, &[4]VirtualPID{ 1, 2, 3, 4 }, a_pids);
+    try std.testing.expectEqualSlices(VirtualPID, &[4]VirtualPID{ 1, 3, 4, 5 }, a_pids);
 
     // clear whole tree
     try flat_map.kill_proc(a_pid);
@@ -303,33 +354,33 @@ test "gaps in pids are re-filled" {
     try std.testing.expectEqual(null, flat_map.procs.get(d_pid));
 }
 
-test "register_initial_proc fails if already registered" {
-    var flat_map = FlatMap.init(std.testing.allocator);
+test "register_root_proc fails if already registered" {
+    var flat_map = VirtualProcesses.init(std.testing.allocator);
     defer flat_map.deinit();
 
-    _ = try flat_map.register_initial_proc(100);
-    try std.testing.expectError(error.InitialProcessExists, flat_map.register_initial_proc(200));
+    _ = try flat_map.register_root_proc(100);
+    try std.testing.expectError(error.InitialProcessExists, flat_map.register_root_proc(200));
 }
 
 test "register_child_proc fails with unknown parent" {
-    var flat_map = FlatMap.init(std.testing.allocator);
+    var flat_map = VirtualProcesses.init(std.testing.allocator);
     defer flat_map.deinit();
 
-    _ = try flat_map.register_initial_proc(100);
+    _ = try flat_map.register_root_proc(100);
     try std.testing.expectError(error.KernelPIDNotFound, flat_map.register_child_proc(999, 200));
 }
 
 test "kill_proc on non-existent pid is no-op" {
-    var flat_map = FlatMap.init(std.testing.allocator);
+    var flat_map = VirtualProcesses.init(std.testing.allocator);
     defer flat_map.deinit();
 
-    _ = try flat_map.register_initial_proc(100);
+    _ = try flat_map.register_root_proc(100);
     try flat_map.kill_proc(999);
     try std.testing.expectEqual(1, flat_map.procs.count());
 }
 
 test "kill intermediate node removes subtree but preserves siblings" {
-    var flat_map = FlatMap.init(std.testing.allocator);
+    var flat_map = VirtualProcesses.init(std.testing.allocator);
     defer flat_map.deinit();
 
     // a
@@ -337,7 +388,7 @@ test "kill intermediate node removes subtree but preserves siblings" {
     // - c
     //   - d
     const a_pid = 10;
-    _ = try flat_map.register_initial_proc(a_pid);
+    _ = try flat_map.register_root_proc(a_pid);
     const b_pid = 20;
     _ = try flat_map.register_child_proc(a_pid, b_pid);
     const c_pid = 30;
@@ -359,40 +410,28 @@ test "kill intermediate node removes subtree but preserves siblings" {
 
 test "collect_tree on single node" {
     const allocator = std.testing.allocator;
-    var flat_map = FlatMap.init(allocator);
+    var flat_map = VirtualProcesses.init(allocator);
     defer flat_map.deinit();
 
-    _ = try flat_map.register_initial_proc(100);
+    _ = try flat_map.register_root_proc(100);
     const proc = flat_map.procs.get(100).?;
 
-    const pids = try proc.collect_tree_pids_sorted_owned(allocator);
+    const pids = try proc.get_pids_owned(allocator);
     defer allocator.free(pids);
 
     try std.testing.expectEqual(1, pids.len);
     try std.testing.expectEqual(1, pids[0]);
 }
 
-test "next_pid returns sequential when no gaps" {
-    const allocator = std.testing.allocator;
-    var flat_map = FlatMap.init(allocator);
-    defer flat_map.deinit();
-
-    _ = try flat_map.register_initial_proc(100);
-    const proc = flat_map.procs.get(100).?;
-
-    const next = try proc.next_pid(allocator);
-    try std.testing.expectEqual(2, next);
-}
-
 test "deep nesting" {
     const allocator = std.testing.allocator;
-    var flat_map = FlatMap.init(allocator);
+    var flat_map = VirtualProcesses.init(allocator);
     defer flat_map.deinit();
 
     // chain: a -> b -> c -> d -> e
     var kernel_pids = [_]KernelPID{ 10, 20, 30, 40, 50 };
 
-    _ = try flat_map.register_initial_proc(kernel_pids[0]);
+    _ = try flat_map.register_root_proc(kernel_pids[0]);
     for (1..5) |i| {
         _ = try flat_map.register_child_proc(kernel_pids[i - 1], kernel_pids[i]);
     }
@@ -406,11 +445,11 @@ test "deep nesting" {
 
 test "wide tree with many siblings" {
     const allocator = std.testing.allocator;
-    var flat_map = FlatMap.init(allocator);
+    var flat_map = VirtualProcesses.init(allocator);
     defer flat_map.deinit();
 
     const parent_pid = 100;
-    _ = try flat_map.register_initial_proc(parent_pid);
+    _ = try flat_map.register_root_proc(parent_pid);
 
     // add 10 children
     for (1..11) |i| {
