@@ -29,9 +29,6 @@ pub fn LinuxResult(comptime T: type) type {
     };
 }
 
-// Re-export MemoryBridge from its new location for convenience
-pub const MemoryBridge = @import("memory/Bridge.zig");
-
 pub const Logger = struct {
     pub const Name = enum {
         prefork,
@@ -59,6 +56,10 @@ pub const Logger = struct {
             .supervisor => "   ",
         };
 
-        std.debug.print("{s}[{s}]{s}{s}\x1b[0m\n", .{ color, @tagName(self.name), padding, fmtlog });
+        std.debug.print("{s}[{s}]{s}{s}\x1b[0m", .{ color, @tagName(self.name), padding, fmtlog });
+    }
+
+    pub fn logln(self: @This(), comptime format: []const u8, args: anytype) void {
+        self.log(format ++ "\n", args);
     }
 };

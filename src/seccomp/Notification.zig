@@ -1,9 +1,10 @@
 const std = @import("std");
 const linux = std.os.linux;
 const types = @import("../types.zig");
-const MemoryBridge = types.MemoryBridge;
+const MemoryBridge = @import("../memory/ProcessMemoryBridge.zig");
 const Logger = types.Logger;
 const Syscall = @import("../syscall/Syscall.zig").Syscall;
+const Supervisor = @import("../Supervisor.zig");
 
 /// Notification is a wrapper around linux.SECCOMP.notif
 const Self = @This();
@@ -37,14 +38,14 @@ pub fn from_notif(mem_bridge: MemoryBridge, notif: linux.SECCOMP.notif) !Self {
 }
 
 /// Invoke the handler, or perform passthrough
-pub fn handle(self: Self, mem_bridge: MemoryBridge, logger: Logger) !Response {
+pub fn handle(self: Self, supervisor: *Supervisor) !Response {
     switch (self.action) {
         .passthrough => |sys_code| {
-            logger.log("Syscall: passthrough: {s}", .{@tagName(sys_code)});
+            supervisor.logger.logln("Syscall: passthrough: {s}", .{@tagName(sys_code)});
             return Response.Passthrough(self.id);
         },
         .emulate => |syscall| {
-            const result = try syscall.handle(mem_bridge, logger);
+            const result = try syscall.handle(supervisor);
             return Response.Emulated(self.id, result);
         },
     }

@@ -30,10 +30,10 @@ pub fn main() !void {
     const logger = Logger.init(.prefork);
 
     // First run normal
-    logger.log("Running child unmodified:", .{});
+    logger.logln("Running child unmodified:", .{});
     example_child(io);
 
     // Then run in syscall interception mode
-    logger.log("Running child with syscall interception:", .{});
+    logger.logln("Running child with syscall interception:", .{});
     try run(example_child);
 }

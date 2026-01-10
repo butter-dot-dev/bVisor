@@ -3,9 +3,6 @@ const linux = std.os.linux;
 const posix = std.posix;
 const LinuxResult = @import("../types.zig").LinuxResult;
 
-/// MemoryBridge allows cross-process reading and writing of arbitrary data from a child process
-/// This is needed for cases where syscalls from a child contain pointers
-/// pointing to its own process-local address space
 const Self = @This();
 
 child_pid: linux.pid_t,
@@ -30,7 +27,6 @@ pub fn read(self: Self, T: type, child_addr: u64) !T {
     }};
 
     _ = try LinuxResult(usize).from(
-        // https://man7.org/linux/man-pages/man2/process_vm_readv.2.html
         linux.process_vm_readv(
             self.child_pid,
             &local_iovec,
@@ -39,6 +35,28 @@ pub fn read(self: Self, T: type, child_addr: u64) !T {
         ),
     ).unwrap();
     return local_T;
+}
+
+/// Read bytes from child's address space into a local buffer
+pub fn readSlice(self: Self, dest: []u8, child_addr: u64) !void {
+    const child_iovec: [1]posix.iovec_const = .{.{
+        .base = @ptrFromInt(child_addr),
+        .len = dest.len,
+    }};
+
+    const local_iovec: [1]posix.iovec = .{.{
+        .base = dest.ptr,
+        .len = dest.len,
+    }};
+
+    _ = try LinuxResult(usize).from(
+        linux.process_vm_readv(
+            self.child_pid,
+            &local_iovec,
+            &child_iovec,
+            0,
+        ),
+    ).unwrap();
 }
 
 /// Write an object of type T into child's address space at child_addr
@@ -55,7 +73,28 @@ pub fn write(self: Self, T: type, val: T, child_addr: u64) !void {
     }};
 
     _ = try LinuxResult(usize).from(
-        // https://man7.org/linux/man-pages/man2/process_vm_writev.2.html
+        linux.process_vm_writev(
+            self.child_pid,
+            &local_iovec,
+            &child_iovec,
+            0,
+        ),
+    ).unwrap();
+}
+
+/// Write bytes from local buffer into child's address space
+pub fn writeSlice(self: Self, src: []const u8, child_addr: u64) !void {
+    const local_iovec: [1]posix.iovec_const = .{.{
+        .base = src.ptr,
+        .len = src.len,
+    }};
+
+    const child_iovec: [1]posix.iovec_const = .{.{
+        .base = @ptrFromInt(child_addr),
+        .len = src.len,
+    }};
+
+    _ = try LinuxResult(usize).from(
         linux.process_vm_writev(
             self.child_pid,
             &local_iovec,

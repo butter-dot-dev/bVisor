@@ -4,7 +4,7 @@ const posix = std.posix;
 const types = @import("types.zig");
 const Notification = @import("seccomp/Notification.zig");
 const FD = types.FD;
-const MemoryBridge = types.MemoryBridge;
+const MemoryBridge = @import("memory/ProcessMemoryBridge.zig");
 const Result = types.LinuxResult;
 const Logger = types.Logger;
 
@@ -25,14 +25,14 @@ pub fn deinit(self: Self) void {
 }
 
 /// Main notification loop. Reads syscall notifications from the kernel,
-pub fn run(self: Self) !void {
+pub fn run(self: *Self) !void {
     while (true) {
         // Receive syscall notification from kernel
         const notif = try self.recv() orelse return;
         const notification = try Notification.from_notif(self.mem_bridge, notif);
 
         // Handle (or prepare passthrough resp)
-        const response = try notification.handle(self.mem_bridge, self.logger);
+        const response = try notification.handle(self);
 
         // Reply to kernel
         try self.send(response.to_notif_resp());
@@ -46,7 +46,7 @@ fn recv(self: Self) !?linux.SECCOMP.notif {
         .Ok => return notif,
         .Error => |err| switch (err) {
             .NOENT => {
-                self.logger.log("Child exited, stopping notification handler", .{});
+                self.logger.logln("Child exited, stopping notification handler", .{});
                 return null;
             },
             else => |_| return posix.unexpectedErrno(err),
