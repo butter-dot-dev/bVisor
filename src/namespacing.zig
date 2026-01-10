@@ -62,37 +62,65 @@ const VirtualProc = struct {
 
     /// Collect a flat list of this process and all descendents
     /// Returned ArrayList must be freed by caller
-    fn collect_tree_owned(self: *Self, allocator: Allocator) !VirtualProcList {
+    fn collect_tree_owned(self: *Self, allocator: Allocator) ![]*VirtualProc {
         var accumulator = try VirtualProcList.initCapacity(allocator, 16);
-        try accumulator.append(allocator, self); // include self
         try self._collect_tree_recursive(&accumulator, allocator);
-        return accumulator;
+        return accumulator.toOwnedSlice(allocator);
+    }
+
+    fn collect_tree_pids_sorted_owned(self: *Self, allocator: Allocator) ![]VirtualPID {
+        const procs = try self.collect_tree_owned(allocator);
+        defer allocator.free(procs);
+        var pids = try std.ArrayList(VirtualPID).initCapacity(allocator, procs.len);
+        for (procs) |proc| {
+            try pids.append(allocator, proc.pid);
+        }
+
+        std.mem.sort(VirtualPID, pids.items, {}, std.sort.asc(VirtualPID));
+        return pids.toOwnedSlice(allocator);
     }
 
     fn _collect_tree_recursive(self: *Self, accumulator: *VirtualProcList, allocator: Allocator) !void {
-        try accumulator.append(allocator, self);
         var iter = self.children.iterator();
         while (iter.next()) |child_entry| {
             const child: *VirtualProc = child_entry.key_ptr.*;
             try child._collect_tree_recursive(accumulator, allocator);
         }
+        try accumulator.append(allocator, self);
     }
 
     pub fn next_pid(self: *Self, allocator: Allocator) !VirtualPID {
-        var procs = try self.collect_tree_owned(allocator);
-        defer procs.deinit(allocator);
-
-        var candidate_pid = self.pid + 1;
-        // increment until no collision with existing
-        // TODO: can be optimized significantly
-        outer: while (true) : (candidate_pid += 1) {
-            for (procs.items) |proc| {
-                if (proc.pid == candidate_pid) {
-                    continue :outer;
-                }
+        std.debug.print("collecting tree pids\n", .{});
+        std.debug.print("self.pid: {}\n", .{self.pid});
+        const pids = try self.collect_tree_pids_sorted_owned(allocator);
+        std.debug.print("pids: {any}\n", .{pids});
+        defer allocator.free(pids);
+        if (pids.len == 0) return 1;
+        // find first gap using windows
+        var iter = std.mem.window(VirtualPID, pids, 2, 1);
+        while (iter.next()) |window| {
+            // window can return a partial window
+            // requiring checks for index-out-of-bounds
+            switch (window.len) {
+                0 => unreachable, // window returns null in this case
+                1 => {
+                    // partial window at end of pids slice
+                    return window[0] + 1;
+                },
+                2 => {
+                    // full window in middle of pids slice
+                    // check for gaps
+                    const a = window[0];
+                    const b = window[1];
+                    if (b - a > 1) {
+                        return a + 1;
+                    }
+                },
+                else => unreachable,
             }
-            return candidate_pid;
         }
+
+        return pids[pids.len - 1] + 1; // no gap found, return next after last
     }
 };
 
@@ -154,7 +182,7 @@ const FlatMap = struct {
 
         // collect all descendents
         var procs_to_delete = try target_proc.collect_tree_owned(allocator);
-        defer procs_to_delete.deinit(allocator);
+        defer allocator.free(procs_to_delete);
 
         // remove target from parent's children
         if (parent) |parent_proc| {
@@ -162,22 +190,25 @@ const FlatMap = struct {
         }
 
         // remove mappings from procs
-        for (procs_to_delete.items) |child| {
+        var kernel_pids_to_remove = try std.ArrayList(KernelPID).initCapacity(allocator, procs_to_delete.len);
+        defer kernel_pids_to_remove.deinit(allocator);
+        for (procs_to_delete) |child| {
             var iter = self.procs.iterator();
             while (iter.next()) |entry| {
                 if (entry.value_ptr.* == child) {
-                    _ = self.procs.remove(entry.key_ptr.*);
+                    try kernel_pids_to_remove.append(allocator, entry.key_ptr.*);
                 }
             }
         }
+        for (kernel_pids_to_remove.items) |kernel_pid| {
+            _ = self.procs.remove(kernel_pid);
+        }
 
-        // mass-deinit items themseles
-        for (procs_to_delete.items) |proc| {
+        // mass-deinit items
+        for (procs_to_delete) |proc| {
             proc.deinit(allocator);
         }
     }
-
-    // pub fn register_clone(self: *Self, parent: KernelPID, child: KernelPID) VirtualPID {}
 };
 
 test "child proc initial state correct" {
@@ -197,22 +228,71 @@ test "child proc initial state correct" {
     try std.testing.expectEqual(0, proc.children.size);
 }
 
-test "child proc deinit" {
-    var flat_map = FlatMap.init(std.testing.allocator);
+test "tree operations" {
+    const allocator = std.testing.allocator;
+    var flat_map = FlatMap.init(allocator);
     defer flat_map.deinit();
     try std.testing.expectEqual(0, flat_map.procs.count());
 
-    const init_pid = 33;
-    const init_vpid = try flat_map.register_initial_proc(init_pid);
+    // create procs of this layout
+    // a
+    // - b
+    // - c
+    //   - d
+
+    const a_pid = 33;
+    const a_vpid = try flat_map.register_initial_proc(a_pid);
     try std.testing.expectEqual(1, flat_map.procs.count());
-    try std.testing.expectEqual(1, init_vpid);
+    try std.testing.expectEqual(1, a_vpid);
 
-    const child_pid = 44;
-    const child_vpid = try flat_map.register_child_proc(init_pid, child_pid);
+    const b_pid = 44;
+    const b_vpid = try flat_map.register_child_proc(a_pid, b_pid);
+    try std.testing.expectEqual(2, b_vpid);
     try std.testing.expectEqual(2, flat_map.procs.count());
-    try std.testing.expectEqual(1, flat_map.procs.get(init_pid).?.children.size);
-    try std.testing.expectEqual(2, child_vpid);
+    try std.testing.expectEqual(1, flat_map.procs.get(a_pid).?.children.size);
+    try std.testing.expectEqual(0, flat_map.procs.get(b_pid).?.children.size);
 
-    try flat_map.kill_proc(init_pid);
-    try std.testing.expectEqual(0, flat_map.procs.count());
+    const c_pid = 55;
+    const c_vpid = try flat_map.register_child_proc(a_pid, c_pid);
+    try std.testing.expectEqual(3, c_vpid);
+    try std.testing.expectEqual(3, flat_map.procs.count());
+    try std.testing.expectEqual(2, flat_map.procs.get(a_pid).?.children.size);
+    try std.testing.expectEqual(0, flat_map.procs.get(c_pid).?.children.size);
+    try std.testing.expectEqual(0, flat_map.procs.get(b_pid).?.children.size);
+
+    const d_pid = 66;
+    const d_vpid = try flat_map.register_child_proc(c_pid, d_pid);
+    try std.testing.expectEqual(4, d_vpid);
+    try std.testing.expectEqual(4, flat_map.procs.count());
+    try std.testing.expectEqual(2, flat_map.procs.get(a_pid).?.children.size);
+    try std.testing.expectEqual(1, flat_map.procs.get(c_pid).?.children.size);
+    try std.testing.expectEqual(0, flat_map.procs.get(b_pid).?.children.size);
+    try std.testing.expectEqual(0, flat_map.procs.get(d_pid).?.children.size);
+
+    // shrink to
+    // a
+    // - c
+    //   - d
+    try flat_map.kill_proc(b_pid);
+    try std.testing.expectEqual(3, flat_map.procs.count());
+    try std.testing.expectEqual(1, flat_map.procs.get(a_pid).?.children.size);
+    try std.testing.expectEqual(1, flat_map.procs.get(c_pid).?.children.size);
+    try std.testing.expectEqual(0, flat_map.procs.get(d_pid).?.children.size);
+    try std.testing.expectEqual(null, flat_map.procs.get(b_pid));
+
+    // get pids
+    var a_pids = try flat_map.procs.get(a_pid).?.collect_tree_pids_sorted_owned(allocator);
+    try std.testing.expectEqual(3, a_pids.len);
+    try std.testing.expectEqualSlices(VirtualPID, &[3]VirtualPID{ 1, 3, 4 }, a_pids);
+    allocator.free(a_pids); // free immediately, since we reuse a_pids var later
+
+    // re-add b, should get original pid for b since was freed
+    const b_pid_2 = 45;
+    const b_vpid_2 = try flat_map.register_child_proc(a_pid, b_pid_2);
+    try std.testing.expectEqual(b_vpid, b_vpid_2);
+
+    a_pids = try flat_map.procs.get(a_pid).?.collect_tree_pids_sorted_owned(allocator);
+    defer allocator.free(a_pids);
+    try std.testing.expectEqual(4, a_pids.len);
+    try std.testing.expectEqualSlices(VirtualPID, &[4]VirtualPID{ 1, 2, 3, 4 }, a_pids);
 }
