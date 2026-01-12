@@ -7,7 +7,11 @@ const FD = types.FD;
 const Logger = types.Logger;
 const Supervisor = @import("Supervisor.zig");
 
-pub fn run(runnable: *const fn (io: std.Io) void) !void {
+// comptime dependency injection
+const deps = @import("deps/deps.zig");
+const lookup_child_fd = deps.pidfd.lookup_child_fd_with_retry;
+
+pub fn setup_and_run(runnable: *const fn (io: std.Io) void) !void {
     // Create socket pair for IPC between child and supervisor
     const socket_pair: [2]FD = try posix.socketpair(
         linux.AF.UNIX,
@@ -31,7 +35,7 @@ pub fn run(runnable: *const fn (io: std.Io) void) !void {
 
 fn child_process(socket: FD, runnable: *const fn (io: std.Io) void) !void {
     const logger = Logger.init(.child);
-    logger.logln("Child process starting", .{});
+    logger.log("Child process starting", .{});
 
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     defer _ = debug_allocator.deinit();
@@ -46,11 +50,7 @@ fn child_process(socket: FD, runnable: *const fn (io: std.Io) void) !void {
     const predicted_fd = try seccomp.predict_notify_fd();
     try send_fd(socket, predicted_fd);
 
-    // Install seccomp filter
-    try seccomp.set_no_new_privs();
-    logger.logln("Privilege elevation locked", .{});
-
-    logger.logln("Entering seccomp mode", .{});
+    logger.log("Entering seccomp mode", .{});
     const notify_fd = try seccomp.install();
 
     if (notify_fd != predicted_fd) {
@@ -63,8 +63,8 @@ fn child_process(socket: FD, runnable: *const fn (io: std.Io) void) !void {
 
 fn supervisor_process(socket: FD, child_pid: linux.pid_t) !void {
     const logger = Logger.init(.supervisor);
-    logger.logln("Supervisor process starting", .{});
-    defer logger.logln("Supervisor process exiting", .{});
+    logger.log("Supervisor process starting", .{});
+    defer logger.log("Supervisor process exiting", .{});
 
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     defer _ = debug_allocator.deinit();
@@ -78,7 +78,7 @@ fn supervisor_process(socket: FD, child_pid: linux.pid_t) !void {
     const child_notify_fd = try recv_fd(socket);
 
     // Get actual notify FD by looking up child's FD table
-    const notify_fd = try seccomp.get_notify_fd_from_child(child_pid, child_notify_fd, io);
+    const notify_fd = try lookup_child_fd(child_pid, child_notify_fd, io);
 
     // Run the supervisor loop
     var supervisor = Supervisor.init(notify_fd, child_pid);

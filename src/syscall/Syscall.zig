@@ -1,7 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
 const types = @import("../types.zig");
-const MemoryBridge = @import("../memory/ProcessMemoryBridge.zig");
 const Logger = types.Logger;
 const Supervisor = @import("../Supervisor.zig");
 
@@ -18,11 +17,11 @@ pub const Syscall = union(enum) {
 
     /// Parse seccomp notif into Syscall
     /// Null return means the syscall is not supported and should passthrough
-    pub fn parse(mem_bridge: MemoryBridge, notif: linux.SECCOMP.notif) !?Self {
+    pub fn parse(notif: linux.SECCOMP.notif) !?Self {
         const sys_code: linux.SYS = @enumFromInt(notif.data.nr);
         switch (sys_code) {
-            .clock_nanosleep => return .{ .clock_nanosleep = try ClockNanosleep.parse(mem_bridge, notif) },
-            .writev => return .{ .writev = try Writev.parse(mem_bridge, notif) },
+            .clock_nanosleep => return .{ .clock_nanosleep = try ClockNanosleep.parse(notif) },
+            .writev => return .{ .writev = try Writev.parse(notif) },
             else => return null,
         }
     }

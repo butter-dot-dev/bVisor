@@ -41,7 +41,6 @@ pub const CloneFlags = struct {
 /// Tracks kernel to virtual mappings, handling parent/child relationships.
 /// Note: we don't currently reparent orphaned children to init; killing a
 /// process kills its entire subtree including any nested namespaces.
-
 allocator: Allocator,
 
 // flat list of mappings from kernel to virtual PID
@@ -118,16 +117,16 @@ pub fn handle_process_exit(self: *Self, pid: KernelPID) !void {
 }
 
 test "state is correct after initial proc" {
-    var virtualizer = Self.init(std.testing.allocator);
-    defer virtualizer.deinit();
-    try std.testing.expect(virtualizer.procs.size == 0);
+    var v_procs = Self.init(std.testing.allocator);
+    defer v_procs.deinit();
+    try std.testing.expect(v_procs.procs.size == 0);
 
     // supervisor spawns child proc of say PID=22, need to register that virtually
     const init_pid = 22;
-    const init_vpid = try virtualizer.handle_initial_process(init_pid);
+    const init_vpid = try v_procs.handle_initial_process(init_pid);
     try std.testing.expectEqual(1, init_vpid);
-    try std.testing.expectEqual(1, virtualizer.procs.size);
-    const proc = virtualizer.procs.get(init_pid).?;
+    try std.testing.expectEqual(1, v_procs.procs.size);
+    const proc = v_procs.procs.get(init_pid).?;
     try std.testing.expectEqual(init_vpid, proc.vpid);
     try std.testing.expectEqual(null, proc.parent);
     try std.testing.expectEqual(0, proc.children.size);
@@ -137,9 +136,9 @@ test "state is correct after initial proc" {
 
 test "basic tree operations work - add, kill" {
     const allocator = std.testing.allocator;
-    var virtualizer = Self.init(allocator);
-    defer virtualizer.deinit();
-    try std.testing.expectEqual(0, virtualizer.procs.size);
+    var v_procs = Self.init(allocator);
+    defer v_procs.deinit();
+    try std.testing.expectEqual(0, v_procs.procs.size);
 
     // create procs of this layout
     // a
@@ -148,132 +147,132 @@ test "basic tree operations work - add, kill" {
     //   - d
 
     const a_pid = 33;
-    const a_vpid = try virtualizer.handle_initial_process(a_pid);
-    try std.testing.expectEqual(1, virtualizer.procs.size);
+    const a_vpid = try v_procs.handle_initial_process(a_pid);
+    try std.testing.expectEqual(1, v_procs.procs.size);
     try std.testing.expectEqual(1, a_vpid);
 
     const b_pid = 44;
-    const b_vpid = try virtualizer.handle_clone(a_pid, b_pid, CloneFlags.from(0));
+    const b_vpid = try v_procs.handle_clone(a_pid, b_pid, CloneFlags.from(0));
     try std.testing.expectEqual(2, b_vpid);
-    try std.testing.expectEqual(2, virtualizer.procs.size);
-    try std.testing.expectEqual(1, virtualizer.procs.get(a_pid).?.children.size);
-    try std.testing.expectEqual(0, virtualizer.procs.get(b_pid).?.children.size);
+    try std.testing.expectEqual(2, v_procs.procs.size);
+    try std.testing.expectEqual(1, v_procs.procs.get(a_pid).?.children.size);
+    try std.testing.expectEqual(0, v_procs.procs.get(b_pid).?.children.size);
 
     const c_pid = 55;
-    const c_vpid = try virtualizer.handle_clone(a_pid, c_pid, CloneFlags.from(0));
+    const c_vpid = try v_procs.handle_clone(a_pid, c_pid, CloneFlags.from(0));
     try std.testing.expectEqual(3, c_vpid);
-    try std.testing.expectEqual(3, virtualizer.procs.size);
-    try std.testing.expectEqual(2, virtualizer.procs.get(a_pid).?.children.size);
-    try std.testing.expectEqual(0, virtualizer.procs.get(c_pid).?.children.size);
-    try std.testing.expectEqual(0, virtualizer.procs.get(b_pid).?.children.size);
+    try std.testing.expectEqual(3, v_procs.procs.size);
+    try std.testing.expectEqual(2, v_procs.procs.get(a_pid).?.children.size);
+    try std.testing.expectEqual(0, v_procs.procs.get(c_pid).?.children.size);
+    try std.testing.expectEqual(0, v_procs.procs.get(b_pid).?.children.size);
 
     const d_pid = 66;
-    const d_vpid = try virtualizer.handle_clone(c_pid, d_pid, CloneFlags.from(0));
+    const d_vpid = try v_procs.handle_clone(c_pid, d_pid, CloneFlags.from(0));
     try std.testing.expectEqual(4, d_vpid);
-    try std.testing.expectEqual(4, virtualizer.procs.size);
-    try std.testing.expectEqual(2, virtualizer.procs.get(a_pid).?.children.size);
-    try std.testing.expectEqual(1, virtualizer.procs.get(c_pid).?.children.size);
-    try std.testing.expectEqual(0, virtualizer.procs.get(b_pid).?.children.size);
-    try std.testing.expectEqual(0, virtualizer.procs.get(d_pid).?.children.size);
+    try std.testing.expectEqual(4, v_procs.procs.size);
+    try std.testing.expectEqual(2, v_procs.procs.get(a_pid).?.children.size);
+    try std.testing.expectEqual(1, v_procs.procs.get(c_pid).?.children.size);
+    try std.testing.expectEqual(0, v_procs.procs.get(b_pid).?.children.size);
+    try std.testing.expectEqual(0, v_procs.procs.get(d_pid).?.children.size);
 
     // shrink to
     // a
     // - c
     //   - d
-    try virtualizer.handle_process_exit(b_pid);
-    try std.testing.expectEqual(3, virtualizer.procs.size);
-    try std.testing.expectEqual(1, virtualizer.procs.get(a_pid).?.children.size);
-    try std.testing.expectEqual(1, virtualizer.procs.get(c_pid).?.children.size);
-    try std.testing.expectEqual(0, virtualizer.procs.get(d_pid).?.children.size);
-    try std.testing.expectEqual(null, virtualizer.procs.get(b_pid));
+    try v_procs.handle_process_exit(b_pid);
+    try std.testing.expectEqual(3, v_procs.procs.size);
+    try std.testing.expectEqual(1, v_procs.procs.get(a_pid).?.children.size);
+    try std.testing.expectEqual(1, v_procs.procs.get(c_pid).?.children.size);
+    try std.testing.expectEqual(0, v_procs.procs.get(d_pid).?.children.size);
+    try std.testing.expectEqual(null, v_procs.procs.get(b_pid));
 
     // get vpids
-    var a_vpids = try virtualizer.procs.get(a_pid).?.get_vpids_owned(allocator);
+    var a_vpids = try v_procs.procs.get(a_pid).?.get_vpids_owned(allocator);
     try std.testing.expectEqual(3, a_vpids.len);
     try std.testing.expectEqualSlices(VirtualPID, &[3]VirtualPID{ 1, 3, 4 }, a_vpids);
     allocator.free(a_vpids); // free immediately, since we reuse a_vpids var later
 
     // re-add b, should issue a new vpid 5
     const b_pid_2 = 45;
-    const b_vpid_2 = try virtualizer.handle_clone(a_pid, b_pid_2, CloneFlags.from(0));
+    const b_vpid_2 = try v_procs.handle_clone(a_pid, b_pid_2, CloneFlags.from(0));
     try std.testing.expectEqual(5, b_vpid_2);
 
-    a_vpids = try virtualizer.procs.get(a_pid).?.get_vpids_owned(allocator);
+    a_vpids = try v_procs.procs.get(a_pid).?.get_vpids_owned(allocator);
     defer allocator.free(a_vpids);
     try std.testing.expectEqual(4, a_vpids.len);
     try std.testing.expectEqualSlices(VirtualPID, &[4]VirtualPID{ 1, 3, 4, 5 }, a_vpids);
 
     // clear whole tree
-    try virtualizer.handle_process_exit(a_pid);
-    try std.testing.expectEqual(0, virtualizer.procs.size);
-    try std.testing.expectEqual(null, virtualizer.procs.get(a_pid));
-    try std.testing.expectEqual(null, virtualizer.procs.get(b_pid));
-    try std.testing.expectEqual(null, virtualizer.procs.get(b_pid_2));
-    try std.testing.expectEqual(null, virtualizer.procs.get(c_pid));
-    try std.testing.expectEqual(null, virtualizer.procs.get(d_pid));
+    try v_procs.handle_process_exit(a_pid);
+    try std.testing.expectEqual(0, v_procs.procs.size);
+    try std.testing.expectEqual(null, v_procs.procs.get(a_pid));
+    try std.testing.expectEqual(null, v_procs.procs.get(b_pid));
+    try std.testing.expectEqual(null, v_procs.procs.get(b_pid_2));
+    try std.testing.expectEqual(null, v_procs.procs.get(c_pid));
+    try std.testing.expectEqual(null, v_procs.procs.get(d_pid));
 }
 
 test "handle_initial_process fails if already registered" {
-    var virtualizer = Self.init(std.testing.allocator);
-    defer virtualizer.deinit();
+    var v_procs = Self.init(std.testing.allocator);
+    defer v_procs.deinit();
 
-    _ = try virtualizer.handle_initial_process(100);
-    try std.testing.expectError(error.InitialProcessExists, virtualizer.handle_initial_process(200));
+    _ = try v_procs.handle_initial_process(100);
+    try std.testing.expectError(error.InitialProcessExists, v_procs.handle_initial_process(200));
 }
 
 test "handle_clone fails with unknown parent" {
-    var virtualizer = Self.init(std.testing.allocator);
-    defer virtualizer.deinit();
+    var v_procs = Self.init(std.testing.allocator);
+    defer v_procs.deinit();
 
-    _ = try virtualizer.handle_initial_process(100);
-    try std.testing.expectError(error.KernelPIDNotFound, virtualizer.handle_clone(999, 200, CloneFlags.from(0)));
+    _ = try v_procs.handle_initial_process(100);
+    try std.testing.expectError(error.KernelPIDNotFound, v_procs.handle_clone(999, 200, CloneFlags.from(0)));
 }
 
 test "handle_process_exit on non-existent pid is no-op" {
-    var virtualizer = Self.init(std.testing.allocator);
-    defer virtualizer.deinit();
+    var v_procs = Self.init(std.testing.allocator);
+    defer v_procs.deinit();
 
-    _ = try virtualizer.handle_initial_process(100);
-    try virtualizer.handle_process_exit(999);
-    try std.testing.expectEqual(1, virtualizer.procs.size);
+    _ = try v_procs.handle_initial_process(100);
+    try v_procs.handle_process_exit(999);
+    try std.testing.expectEqual(1, v_procs.procs.size);
 }
 
 test "kill intermediate node removes subtree but preserves siblings" {
-    var virtualizer = Self.init(std.testing.allocator);
-    defer virtualizer.deinit();
+    var v_procs = Self.init(std.testing.allocator);
+    defer v_procs.deinit();
 
     // a
     // - b
     // - c
     //   - d
     const a_pid = 10;
-    _ = try virtualizer.handle_initial_process(a_pid);
+    _ = try v_procs.handle_initial_process(a_pid);
     const b_pid = 20;
-    _ = try virtualizer.handle_clone(a_pid, b_pid, CloneFlags.from(0));
+    _ = try v_procs.handle_clone(a_pid, b_pid, CloneFlags.from(0));
     const c_pid = 30;
-    _ = try virtualizer.handle_clone(a_pid, c_pid, CloneFlags.from(0));
+    _ = try v_procs.handle_clone(a_pid, c_pid, CloneFlags.from(0));
     const d_pid = 40;
-    _ = try virtualizer.handle_clone(c_pid, d_pid, CloneFlags.from(0));
+    _ = try v_procs.handle_clone(c_pid, d_pid, CloneFlags.from(0));
 
-    try std.testing.expectEqual(4, virtualizer.procs.size);
+    try std.testing.expectEqual(4, v_procs.procs.size);
 
     // kill c (intermediate) - should also remove d but preserve a and b
-    try virtualizer.handle_process_exit(c_pid);
+    try v_procs.handle_process_exit(c_pid);
 
-    try std.testing.expectEqual(2, virtualizer.procs.size);
-    try std.testing.expect(virtualizer.procs.get(a_pid) != null);
-    try std.testing.expect(virtualizer.procs.get(b_pid) != null);
-    try std.testing.expectEqual(null, virtualizer.procs.get(c_pid));
-    try std.testing.expectEqual(null, virtualizer.procs.get(d_pid));
+    try std.testing.expectEqual(2, v_procs.procs.size);
+    try std.testing.expect(v_procs.procs.get(a_pid) != null);
+    try std.testing.expect(v_procs.procs.get(b_pid) != null);
+    try std.testing.expectEqual(null, v_procs.procs.get(c_pid));
+    try std.testing.expectEqual(null, v_procs.procs.get(d_pid));
 }
 
 test "collect_tree on single node" {
     const allocator = std.testing.allocator;
-    var virtualizer = Self.init(allocator);
-    defer virtualizer.deinit();
+    var v_procs = Self.init(allocator);
+    defer v_procs.deinit();
 
-    _ = try virtualizer.handle_initial_process(100);
-    const proc = virtualizer.procs.get(100).?;
+    _ = try v_procs.handle_initial_process(100);
+    const proc = v_procs.procs.get(100).?;
 
     const vpids = try proc.get_vpids_owned(allocator);
     defer allocator.free(vpids);
@@ -284,47 +283,47 @@ test "collect_tree on single node" {
 
 test "deep nesting" {
     const allocator = std.testing.allocator;
-    var virtualizer = Self.init(allocator);
-    defer virtualizer.deinit();
+    var v_procs = Self.init(allocator);
+    defer v_procs.deinit();
 
     // chain: a -> b -> c -> d -> e
     var pids = [_]KernelPID{ 10, 20, 30, 40, 50 };
 
-    _ = try virtualizer.handle_initial_process(pids[0]);
+    _ = try v_procs.handle_initial_process(pids[0]);
     for (1..5) |i| {
-        _ = try virtualizer.handle_clone(pids[i - 1], pids[i], CloneFlags.from(0));
+        _ = try v_procs.handle_clone(pids[i - 1], pids[i], CloneFlags.from(0));
     }
 
-    try std.testing.expectEqual(5, virtualizer.procs.size);
+    try std.testing.expectEqual(5, v_procs.procs.size);
 
     // kill middle (c) - should remove c, d, e
-    try virtualizer.handle_process_exit(pids[2]);
-    try std.testing.expectEqual(2, virtualizer.procs.size);
+    try v_procs.handle_process_exit(pids[2]);
+    try std.testing.expectEqual(2, v_procs.procs.size);
 }
 
 test "wide tree with many siblings" {
     const allocator = std.testing.allocator;
-    var virtualizer = Self.init(allocator);
-    defer virtualizer.deinit();
+    var v_procs = Self.init(allocator);
+    defer v_procs.deinit();
 
     const parent_pid = 100;
-    _ = try virtualizer.handle_initial_process(parent_pid);
+    _ = try v_procs.handle_initial_process(parent_pid);
 
     // add 10 children
     for (1..11) |i| {
         const child_pid: KernelPID = @intCast(100 + i);
-        const vpid = try virtualizer.handle_clone(parent_pid, child_pid, CloneFlags.from(0));
+        const vpid = try v_procs.handle_clone(parent_pid, child_pid, CloneFlags.from(0));
         try std.testing.expectEqual(@as(VirtualPID, @intCast(i + 1)), vpid);
     }
 
-    try std.testing.expectEqual(11, virtualizer.procs.size);
-    try std.testing.expectEqual(10, virtualizer.procs.get(parent_pid).?.children.size);
+    try std.testing.expectEqual(11, v_procs.procs.size);
+    try std.testing.expectEqual(10, v_procs.procs.get(parent_pid).?.children.size);
 }
 
 test "nested namespace - get_vpids_owned respects boundaries" {
     const allocator = std.testing.allocator;
-    var virtualizer = Self.init(allocator);
-    defer virtualizer.deinit();
+    var v_procs = Self.init(allocator);
+    defer v_procs.deinit();
 
     // Create structure:
     // ns1: A(vpid=1) -> B(vpid=2)
@@ -332,13 +331,13 @@ test "nested namespace - get_vpids_owned respects boundaries" {
     //                   ns2: B(vpid=1) -> C(vpid=2)
 
     const a_pid = 100;
-    _ = try virtualizer.handle_initial_process(a_pid);
-    const a_proc = virtualizer.procs.get(a_pid).?;
+    _ = try v_procs.handle_initial_process(a_pid);
+    const a_proc = v_procs.procs.get(a_pid).?;
 
     // B: child of A but root of new namespace (CLONE_NEWPID)
     const b_pid = 200;
-    _ = try virtualizer.handle_clone(a_pid, b_pid, CloneFlags.from(linux.CLONE.NEWPID));
-    const b_proc = virtualizer.procs.get(b_pid).?;
+    _ = try v_procs.handle_clone(a_pid, b_pid, CloneFlags.from(linux.CLONE.NEWPID));
+    const b_proc = v_procs.procs.get(b_pid).?;
 
     try std.testing.expect(b_proc.is_namespace_root());
     try std.testing.expectEqual(@as(VirtualPID, 1), b_proc.vpid); // vpid 1 in ns2
@@ -346,10 +345,10 @@ test "nested namespace - get_vpids_owned respects boundaries" {
 
     // C: child of B in ns2
     const c_pid = 300;
-    const c_vpid = try virtualizer.handle_clone(b_pid, c_pid, CloneFlags.from(0));
+    const c_vpid = try v_procs.handle_clone(b_pid, c_pid, CloneFlags.from(0));
     try std.testing.expectEqual(@as(VirtualPID, 2), c_vpid); // vpid 2 in ns2
 
-    const c_proc = virtualizer.procs.get(c_pid).?;
+    const c_proc = v_procs.procs.get(c_pid).?;
     try std.testing.expect(b_proc.namespace == c_proc.namespace);
 
     // get_vpids_owned from A should only see A and B's vpid in ns1
@@ -375,70 +374,70 @@ test "nested namespace - get_vpids_owned respects boundaries" {
 
 test "nested namespace - killing parent kills nested namespace" {
     const allocator = std.testing.allocator;
-    var virtualizer = Self.init(allocator);
-    defer virtualizer.deinit();
+    var v_procs = Self.init(allocator);
+    defer v_procs.deinit();
 
     // ns1: A(1) -> B(ns2 root, vpid=1) -> C(vpid=2 in ns2)
     const a_pid = 100;
-    _ = try virtualizer.handle_initial_process(a_pid);
+    _ = try v_procs.handle_initial_process(a_pid);
 
     const b_pid = 200;
-    _ = try virtualizer.handle_clone(a_pid, b_pid, CloneFlags.from(linux.CLONE.NEWPID));
+    _ = try v_procs.handle_clone(a_pid, b_pid, CloneFlags.from(linux.CLONE.NEWPID));
 
     const c_pid = 300;
-    _ = try virtualizer.handle_clone(b_pid, c_pid, CloneFlags.from(0));
+    _ = try v_procs.handle_clone(b_pid, c_pid, CloneFlags.from(0));
 
-    try std.testing.expectEqual(3, virtualizer.procs.size);
+    try std.testing.expectEqual(3, v_procs.procs.size);
 
     // Kill B - should also kill C (entire subtree, crossing namespace boundary)
-    try virtualizer.handle_process_exit(b_pid);
+    try v_procs.handle_process_exit(b_pid);
 
-    try std.testing.expectEqual(1, virtualizer.procs.size);
-    try std.testing.expect(virtualizer.procs.get(a_pid) != null);
-    try std.testing.expectEqual(null, virtualizer.procs.get(b_pid));
-    try std.testing.expectEqual(null, virtualizer.procs.get(c_pid));
+    try std.testing.expectEqual(1, v_procs.procs.size);
+    try std.testing.expect(v_procs.procs.get(a_pid) != null);
+    try std.testing.expectEqual(null, v_procs.procs.get(b_pid));
+    try std.testing.expectEqual(null, v_procs.procs.get(c_pid));
 }
 
 test "nested namespace - killing grandparent kills all" {
     const allocator = std.testing.allocator;
-    var virtualizer = Self.init(allocator);
-    defer virtualizer.deinit();
+    var v_procs = Self.init(allocator);
+    defer v_procs.deinit();
 
     // ns1: A -> B (ns2 root) -> C -> D (ns3 root) -> E
     const a_pid = 100;
-    _ = try virtualizer.handle_initial_process(a_pid);
+    _ = try v_procs.handle_initial_process(a_pid);
 
     const b_pid = 200;
-    _ = try virtualizer.handle_clone(a_pid, b_pid, CloneFlags.from(linux.CLONE.NEWPID));
+    _ = try v_procs.handle_clone(a_pid, b_pid, CloneFlags.from(linux.CLONE.NEWPID));
 
     const c_pid = 300;
-    _ = try virtualizer.handle_clone(b_pid, c_pid, CloneFlags.from(0));
+    _ = try v_procs.handle_clone(b_pid, c_pid, CloneFlags.from(0));
 
     const d_pid = 400;
-    _ = try virtualizer.handle_clone(c_pid, d_pid, CloneFlags.from(linux.CLONE.NEWPID));
+    _ = try v_procs.handle_clone(c_pid, d_pid, CloneFlags.from(linux.CLONE.NEWPID));
 
     const e_pid = 500;
-    _ = try virtualizer.handle_clone(d_pid, e_pid, CloneFlags.from(0));
+    _ = try v_procs.handle_clone(d_pid, e_pid, CloneFlags.from(0));
 
-    try std.testing.expectEqual(5, virtualizer.procs.size);
+    try std.testing.expectEqual(5, v_procs.procs.size);
 
     // Kill A - should kill everything
-    try virtualizer.handle_process_exit(a_pid);
-    try std.testing.expectEqual(0, virtualizer.procs.size);
+    try v_procs.handle_process_exit(a_pid);
+    try std.testing.expectEqual(0, v_procs.procs.size);
 }
 
 test "pid is stored correctly" {
     const allocator = std.testing.allocator;
-    var virtualizer = Self.init(allocator);
-    defer virtualizer.deinit();
+    var v_procs = Self.init(allocator);
+    defer v_procs.deinit();
 
     const a_pid = 12345;
-    _ = try virtualizer.handle_initial_process(a_pid);
-    const a_proc = virtualizer.procs.get(a_pid).?;
+    _ = try v_procs.handle_initial_process(a_pid);
+    const a_proc = v_procs.procs.get(a_pid).?;
     try std.testing.expectEqual(a_pid, a_proc.pid);
 
     const b_pid = 67890;
-    _ = try virtualizer.handle_clone(a_pid, b_pid, CloneFlags.from(0));
-    const b_proc = virtualizer.procs.get(b_pid).?;
+    _ = try v_procs.handle_clone(a_pid, b_pid, CloneFlags.from(0));
+    const b_proc = v_procs.procs.get(b_pid).?;
     try std.testing.expectEqual(b_pid, b_proc.pid);
 }

@@ -39,6 +39,10 @@ pub fn install() !FD {
         .filter = &instructions,
     };
 
+    // Set NO_NEW_PRIVS mode
+    // Required before installing seccomp filter
+    _ = try posix.prctl(posix.PR.SET_NO_NEW_PRIVS, .{ 1, 0, 0, 0 });
+
     return try Result(FD).from(
         linux.seccomp(
             linux.SECCOMP.SET_MODE_FILTER,
@@ -46,11 +50,6 @@ pub fn install() !FD {
             @ptrCast(&prog),
         ),
     ).unwrap();
-}
-
-/// Set NO_NEW_PRIVS mode. Required before installing seccomp filter.
-pub fn set_no_new_privs() !void {
-    _ = try posix.prctl(posix.PR.SET_NO_NEW_PRIVS, .{ 1, 0, 0, 0 });
 }
 
 /// Get notify FD from child process (supervisor side).

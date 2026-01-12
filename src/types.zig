@@ -56,10 +56,6 @@ pub const Logger = struct {
             .supervisor => "   ",
         };
 
-        std.debug.print("{s}[{s}]{s}{s}\x1b[0m", .{ color, @tagName(self.name), padding, fmtlog });
-    }
-
-    pub fn logln(self: @This(), comptime format: []const u8, args: anytype) void {
-        self.log(format ++ "\n", args);
+        std.debug.print("{s}[{s}]{s}{s}\x1b[0m\n", .{ color, @tagName(self.name), padding, fmtlog });
     }
 };

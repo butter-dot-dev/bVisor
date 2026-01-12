@@ -1,7 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
 const types = @import("../types.zig");
-const MemoryBridge = @import("../memory/ProcessMemoryBridge.zig");
 const Logger = types.Logger;
 const Syscall = @import("../syscall/Syscall.zig").Syscall;
 const Supervisor = @import("../Supervisor.zig");
@@ -16,8 +15,8 @@ action: union(enum) {
 },
 
 /// Parse a linux.SECCOMP.notif into a Notification
-pub fn from_notif(mem_bridge: MemoryBridge, notif: linux.SECCOMP.notif) !Self {
-    const supported = try Syscall.parse(mem_bridge, notif);
+pub fn from_notif(notif: linux.SECCOMP.notif) !Self {
+    const supported = try Syscall.parse(notif);
 
     if (supported) |syscall| {
         return .{
@@ -41,7 +40,7 @@ pub fn from_notif(mem_bridge: MemoryBridge, notif: linux.SECCOMP.notif) !Self {
 pub fn handle(self: Self, supervisor: *Supervisor) !Response {
     switch (self.action) {
         .passthrough => |sys_code| {
-            supervisor.logger.logln("Syscall: passthrough: {s}", .{@tagName(sys_code)});
+            supervisor.logger.log("Syscall: passthrough: {s}", .{@tagName(sys_code)});
             return Response.Passthrough(self.id);
         },
         .emulate => |syscall| {

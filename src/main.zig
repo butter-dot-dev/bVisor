@@ -1,10 +1,10 @@
 const std = @import("std");
 const types = @import("types.zig");
 const Logger = types.Logger;
-const run = @import("setup.zig").run;
+const setup_and_run = @import("setup.zig").setup_and_run;
 
 test {
-    _ = @import("process/Virtualizer.zig");
+    _ = @import("virtual/proc/Procs.zig");
 }
 
 // Example child process, could be a bash command or anything else
@@ -30,10 +30,10 @@ pub fn main() !void {
     const logger = Logger.init(.prefork);
 
     // First run normal
-    logger.logln("Running child unmodified:", .{});
+    logger.log("Running child unmodified:", .{});
     example_child(io);
 
     // Then run in syscall interception mode
-    logger.logln("Running child with syscall interception:", .{});
-    try run(example_child);
+    logger.log("Running child with syscall interception:", .{});
+    try setup_and_run(example_child);
 }

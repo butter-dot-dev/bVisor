@@ -2,10 +2,13 @@ const std = @import("std");
 const linux = std.os.linux;
 const posix = std.posix;
 const types = @import("../../types.zig");
-const MemoryBridge = @import("../../memory/ProcessMemoryBridge.zig");
 const FD = types.FD;
 const Result = @import("../Syscall.zig").Syscall.Result;
 const Supervisor = @import("../../Supervisor.zig");
+
+// comptime dependency injection
+const deps = @import("../../deps/deps.zig");
+const memory_bridge = deps.memory_bridge;
 
 const Self = @This();
 
@@ -20,7 +23,7 @@ iovecs: [MAX_IOV]posix.iovec_const,
 data_buf: [4096]u8,
 data_len: usize,
 
-pub fn parse(mem_bridge: MemoryBridge, notif: linux.SECCOMP.notif) !Self {
+pub fn parse(notif: linux.SECCOMP.notif) !Self {
     var self: Self = .{
         .fd = @bitCast(@as(u32, @truncate(notif.data.arg0))),
         .iov_ptr = notif.data.arg1,
@@ -33,7 +36,7 @@ pub fn parse(mem_bridge: MemoryBridge, notif: linux.SECCOMP.notif) !Self {
     // Read iovec array from child memory
     for (0..self.iovcnt) |i| {
         const iov_addr = self.iov_ptr + i * @sizeOf(posix.iovec_const);
-        self.iovecs[i] = try mem_bridge.read(posix.iovec_const, iov_addr);
+        self.iovecs[i] = try memory_bridge.read(posix.iovec_const, @intCast(notif.pid), iov_addr);
     }
 
     // Read buffer data from child memory for each iovec (one syscall per iovec)
@@ -44,7 +47,7 @@ pub fn parse(mem_bridge: MemoryBridge, notif: linux.SECCOMP.notif) !Self {
 
         if (buf_len > 0) {
             const dest = self.data_buf[self.data_len..][0..buf_len];
-            try mem_bridge.readSlice(dest, buf_ptr);
+            try memory_bridge.readSlice(dest, @intCast(notif.pid), buf_ptr);
             self.data_len += buf_len;
         }
     }
@@ -56,7 +59,7 @@ pub fn handle(self: Self, supervisor: *Supervisor) !Result {
     const logger = supervisor.logger;
     // TODO: supervisor.fs
 
-    logger.logln("Emulating writev: fd={d} iovcnt={d} total_bytes={d}", .{
+    logger.log("Emulating writev: fd={d} iovcnt={d} total_bytes={d}", .{
         self.fd,
         self.iovcnt,
         self.data_len,
@@ -66,10 +69,10 @@ pub fn handle(self: Self, supervisor: *Supervisor) !Result {
     const data = self.data_buf[0..self.data_len];
     switch (self.fd) {
         linux.STDOUT_FILENO => {
-            logger.log("stdout:\n\n{s}\n", .{std.mem.sliceTo(data, 0)});
+            logger.log("stdout:\n\n{s}", .{std.mem.sliceTo(data, 0)});
         },
         linux.STDERR_FILENO => {
-            logger.log("stderr:\n\n{s}\n", .{std.mem.sliceTo(data, 0)});
+            logger.log("stderr:\n\n{s}", .{std.mem.sliceTo(data, 0)});
         },
         else => {
             logger.log("writev: passthrough for non-stdout/stderr fd={d}", .{self.fd});
