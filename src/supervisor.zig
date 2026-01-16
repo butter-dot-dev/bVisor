@@ -6,22 +6,32 @@ const Notification = @import("seccomp/Notification.zig");
 const FD = types.FD;
 const Result = types.LinuxResult;
 const Logger = types.Logger;
+const Procs = @import("virtual/proc/Procs.zig");
+const Allocator = std.mem.Allocator;
 
 const Self = @This();
 
+allocator: Allocator,
 init_child_pid: linux.pid_t,
 notify_fd: FD,
 logger: Logger,
+// vfs: VFS, // TODO
 
-pub fn init(notify_fd: FD, child_pid: linux.pid_t) Self {
+virtual_procs: Procs,
+
+pub fn init(allocator: Allocator, notify_fd: FD, child_pid: linux.pid_t) !Self {
     const logger = Logger.init(.supervisor);
-    return .{ .init_child_pid = child_pid, .notify_fd = notify_fd, .logger = logger };
+    var virtual_procs = Procs.init(allocator);
+    errdefer virtual_procs.deinit();
+    _ = try virtual_procs.handle_initial_process(child_pid);
+    return .{ .allocator = allocator, .init_child_pid = child_pid, .notify_fd = notify_fd, .logger = logger, .virtual_procs = virtual_procs };
 }
 
-pub fn deinit(self: Self) void {
+pub fn deinit(self: *Self) void {
     if (self.notify_fd >= 0) {
         posix.close(self.notify_fd);
     }
+    self.virtual_procs.deinit();
 }
 
 /// Main notification loop. Reads syscall notifications from the kernel,

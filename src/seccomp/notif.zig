@@ -2,9 +2,16 @@ const std = @import("std");
 const linux = std.os.linux;
 
 /// Convenience function for creating synthetic notifs for testing
-pub fn makeNotif(syscall_nr: linux.SYS, args: struct { arg0: u64 = 0, arg1: u64 = 0, arg2: u64 = 0, arg3: u64 = 0 }) linux.SECCOMP.notif {
+pub fn makeNotif(syscall_nr: linux.SYS, args: struct {
+    pid: linux.pid_t = 0,
+    arg0: u64 = 0,
+    arg1: u64 = 0,
+    arg2: u64 = 0,
+    arg3: u64 = 0,
+}) linux.SECCOMP.notif {
     var notif = std.mem.zeroes(linux.SECCOMP.notif);
     notif.id = 1;
+    notif.pid = @bitCast(args.pid);
     notif.data.nr = @intCast(@intFromEnum(syscall_nr));
     notif.data.arg0 = args.arg0;
     notif.data.arg1 = args.arg1;
