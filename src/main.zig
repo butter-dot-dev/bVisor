@@ -8,7 +8,7 @@ test {
     _ = @import("virtual/proc/Procs.zig");
     _ = @import("virtual/fs/FD.zig");
     _ = @import("virtual/fs/FdTable.zig");
-    _ = @import("syscall/handlers/OpenAt.zig");
+    _ = @import("virtual/syscall/handlers/OpenAt.zig");
 }
 
 // Example child process, could be a bash command or anything else

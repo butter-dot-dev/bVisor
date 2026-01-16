@@ -15,8 +15,9 @@ allocator: Allocator,
 init_child_pid: linux.pid_t,
 notify_fd: KernelFD,
 logger: Logger,
-// vfs: VFS, // TODO
 
+// All procs starting from the initial child proc are assigned a virtual PID and tracked via virtual_procs
+// All pros track their own virtual namespaces and file descriptors
 virtual_procs: Procs,
 
 pub fn init(allocator: Allocator, notify_fd: KernelFD, child_pid: linux.pid_t) !Self {
@@ -69,7 +70,3 @@ fn send(self: Self, resp: linux.SECCOMP.notif_resp) !void {
         linux.ioctl(self.notify_fd, linux.SECCOMP.IOCTL_NOTIF.SEND, @intFromPtr(&resp)),
     ).unwrap();
 }
-
-// E2E tests
-
-const testing = std.testing;

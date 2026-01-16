@@ -81,7 +81,8 @@ fn supervisor_process(socket: KernelFD, child_pid: linux.pid_t) !void {
     const notify_fd = try lookup_child_fd(child_pid, child_notify_fd, io);
 
     // Run the supervisor loop
-    var supervisor = Supervisor.init(notify_fd, child_pid);
+    var supervisor = try Supervisor.init(gpa, notify_fd, child_pid);
+    defer supervisor.deinit();
     try supervisor.run();
 }
 

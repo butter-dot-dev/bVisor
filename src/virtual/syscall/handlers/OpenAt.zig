@@ -2,19 +2,19 @@ const std = @import("std");
 const builtin = @import("builtin");
 const linux = std.os.linux;
 const posix = std.posix;
-const Proc = @import("../../virtual/proc/Proc.zig");
-const Procs = @import("../../virtual/proc/Procs.zig");
-const FD = @import("../../virtual/fs/FD.zig").FD;
-const FdTable = @import("../../virtual/fs/FdTable.zig");
-const types = @import("../../types.zig");
-const Supervisor = @import("../../Supervisor.zig");
+const Proc = @import("../../../virtual/proc/Proc.zig");
+const Procs = @import("../../../virtual/proc/Procs.zig");
+const FD = @import("../../../virtual/fs/FD.zig").FD;
+const FdTable = @import("../../../virtual/fs/FdTable.zig");
+const types = @import("../../../types.zig");
+const Supervisor = @import("../../../Supervisor.zig");
 const KernelFD = types.KernelFD;
 const Result = @import("../syscall.zig").Syscall.Result;
 const testing = std.testing;
-const makeNotif = @import("../../seccomp/notif.zig").makeNotif;
+const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
 
 // comptime dependency injection
-const deps = @import("../../deps/deps.zig");
+const deps = @import("../../../deps/deps.zig");
 const memory_bridge = deps.memory_bridge;
 
 const Self = @This();
@@ -189,7 +189,7 @@ pub fn handle(self: Self, supervisor: *Supervisor) !Result {
     switch (action) {
         .block => {
             logger.log("openat: blocked path: {s}", .{self.path()});
-            return .{ .handled = Result.Handled.err(linux.E.PERM) };
+            return Result.reply_err(.PERM);
         },
         .allow => {
             logger.log("openat: allowed path: {s}", .{self.path()});
@@ -208,7 +208,7 @@ fn handleVirtualizeProc(self: Self, supervisor: *Supervisor) !Result {
     // Look up the calling process
     const proc = supervisor.virtual_procs.procs.get(self.kernel_pid) orelse {
         logger.log("openat: kernel pid {d} not found in virtual_procs", .{self.kernel_pid});
-        return .{ .handled = Result.Handled.err(linux.E.NOENT) };
+        return Result.reply_err(.NOENT);
     };
 
     // Parse the /proc path to get target vpid
@@ -216,7 +216,7 @@ fn handleVirtualizeProc(self: Self, supervisor: *Supervisor) !Result {
 
     var parts = std.mem.tokenizeScalar(u8, path_str, '/');
     _ = parts.next(); // skip "proc"
-    const vpid_part = parts.next() orelse return .{ .handled = Result.Handled.err(linux.E.NOENT) };
+    const vpid_part = parts.next() orelse return Result.reply_err(.NOENT);
 
     // Determine target vpid
     // Format: /proc/self/..., /proc/<vpid>/..., or global files like /proc/meminfo
@@ -235,7 +235,7 @@ fn handleVirtualizeProc(self: Self, supervisor: *Supervisor) !Result {
 
     logger.log("openat: opened virtual fd={d}", .{vfd});
 
-    return .{ .handled = Result.Handled.success(@intCast(vfd)) };
+    return Result.reply_success(@intCast(vfd));
 }
 
 fn handleAllow(self: Self, supervisor: *Supervisor) !Result {
@@ -244,7 +244,7 @@ fn handleAllow(self: Self, supervisor: *Supervisor) !Result {
     // Look up the calling process
     const proc = supervisor.virtual_procs.procs.get(self.kernel_pid) orelse {
         logger.log("openat: kernel pid {d} not found in virtual_procs", .{self.kernel_pid});
-        return .{ .handled = Result.Handled.err(linux.E.NOENT) };
+        return Result.reply_err(.NOENT);
     };
 
     // Perform the open ourselves using posix (works on both Linux and macOS for tests)
@@ -257,7 +257,7 @@ fn handleAllow(self: Self, supervisor: *Supervisor) !Result {
     const kfd = posix.openat(self.dirfd, path_slice, posix_flags, @truncate(self.mode)) catch |err| {
         const errno = posixErrorToLinuxErrno(err);
         logger.log("openat: kernel open failed: {s}", .{@tagName(errno)});
-        return .{ .handled = Result.Handled.err(errno) };
+        return Result.reply_err(errno);
     };
 
     // Store in fd_table as kernel fd
@@ -265,7 +265,7 @@ fn handleAllow(self: Self, supervisor: *Supervisor) !Result {
 
     logger.log("openat: opened kernel fd={d} as vfd={d}", .{ kfd, vfd });
 
-    return .{ .handled = Result.Handled.success(@intCast(vfd)) };
+    return Result.reply_success(@intCast(vfd));
 }
 
 test "openat blocks private paths" {
@@ -297,8 +297,8 @@ test "openat blocks private paths" {
     std.debug.print("path: {s}\n", .{parsed.path()});
     try testing.expectEqualStrings("/sys/private.txt", parsed.path());
     const res = try parsed.handle(&supervisor);
-    try testing.expect(res == .handled);
-    try testing.expect(res.handled.is_error());
+    try testing.expect(res == .reply);
+    try testing.expect(res.is_error());
 }
 
 test "openat blocks /sys/class/net" {
@@ -316,8 +316,8 @@ test "openat blocks /sys/class/net" {
 
     const parsed = try Self.parse(notif);
     const res = try parsed.handle(&supervisor);
-    try testing.expect(res == .handled);
-    try testing.expect(res.handled.is_error());
+    try testing.expect(res == .reply);
+    try testing.expect(res.is_error());
 }
 
 test "openat blocks /sys/kernel/security" {
@@ -335,8 +335,8 @@ test "openat blocks /sys/kernel/security" {
 
     const parsed = try Self.parse(notif);
     const res = try parsed.handle(&supervisor);
-    try testing.expect(res == .handled);
-    try testing.expect(res.handled.is_error());
+    try testing.expect(res == .reply);
+    try testing.expect(res.is_error());
 }
 
 test "openat blocks /run/docker.sock" {
@@ -354,8 +354,8 @@ test "openat blocks /run/docker.sock" {
 
     const parsed = try Self.parse(notif);
     const res = try parsed.handle(&supervisor);
-    try testing.expect(res == .handled);
-    try testing.expect(res.handled.is_error());
+    try testing.expect(res == .reply);
+    try testing.expect(res.is_error());
 }
 
 test "openat blocks /run/user paths" {
@@ -373,8 +373,8 @@ test "openat blocks /run/user paths" {
 
     const parsed = try Self.parse(notif);
     const res = try parsed.handle(&supervisor);
-    try testing.expect(res == .handled);
-    try testing.expect(res.handled.is_error());
+    try testing.expect(res == .reply);
+    try testing.expect(res.is_error());
 }
 
 test "useVFS detects write modes" {
@@ -399,8 +399,8 @@ test "openat virtualizes /proc/self/status" {
 
     const parsed = try Self.parse(notif);
     const res = try parsed.handle(&supervisor);
-    try testing.expect(res == .handled);
-    try testing.expect(!res.handled.is_error());
+    try testing.expect(res == .reply);
+    try testing.expect(!res.is_error());
 }
 
 test "openat virtualizes /proc/1/status" {
@@ -418,8 +418,8 @@ test "openat virtualizes /proc/1/status" {
 
     const parsed = try Self.parse(notif);
     const res = try parsed.handle(&supervisor);
-    try testing.expect(res == .handled);
-    try testing.expect(!res.handled.is_error());
+    try testing.expect(res == .reply);
+    try testing.expect(!res.is_error());
 }
 
 test "openat virtualizes /proc/meminfo" {
@@ -437,8 +437,8 @@ test "openat virtualizes /proc/meminfo" {
 
     const parsed = try Self.parse(notif);
     const res = try parsed.handle(&supervisor);
-    try testing.expect(res == .handled);
-    try testing.expect(!res.handled.is_error());
+    try testing.expect(res == .reply);
+    try testing.expect(!res.is_error());
 }
 
 test "openat /proc/self resolves to vpid 2 for child process" {
@@ -462,8 +462,8 @@ test "openat /proc/self resolves to vpid 2 for child process" {
 
     const parsed = try Self.parse(notif);
     const res = try parsed.handle(&supervisor);
-    try testing.expect(res == .handled);
-    try testing.expect(!res.handled.is_error());
+    try testing.expect(res == .reply);
+    try testing.expect(!res.is_error());
 }
 
 test "openat handles allowed paths (returns NOENT for missing file)" {
@@ -482,10 +482,10 @@ test "openat handles allowed paths (returns NOENT for missing file)" {
     const parsed = try Self.parse(notif);
     const res = try parsed.handle(&supervisor);
     // Supervisor handles all opens now (no passthrough)
-    try testing.expect(res == .handled);
+    try testing.expect(res == .reply);
     // File doesn't exist, so we get NOENT
-    try testing.expect(res.handled.is_error());
-    try testing.expectEqual(linux.E.NOENT, @as(linux.E, @enumFromInt(res.handled.errno)));
+    try testing.expect(res.is_error());
+    try testing.expectEqual(linux.E.NOENT, @as(linux.E, @enumFromInt(res.reply.errno)));
 }
 
 test "openat O_WRONLY on missing file returns NOENT" {
@@ -503,10 +503,10 @@ test "openat O_WRONLY on missing file returns NOENT" {
 
     const parsed = try Self.parse(notif);
     const res = try parsed.handle(&supervisor);
-    try testing.expect(res == .handled);
+    try testing.expect(res == .reply);
     // O_WRONLY without O_CREAT on nonexistent file should fail
-    try testing.expect(res.handled.is_error());
-    try testing.expectEqual(linux.E.NOENT, @as(linux.E, @enumFromInt(res.handled.errno)));
+    try testing.expect(res.is_error());
+    try testing.expectEqual(linux.E.NOENT, @as(linux.E, @enumFromInt(res.reply.errno)));
 }
 
 test "openat O_CREAT creates file, write and read back" {
@@ -539,10 +539,10 @@ test "openat O_CREAT creates file, write and read back" {
 
         const parsed = try Self.parse(notif);
         const res = try parsed.handle(&supervisor);
-        try testing.expect(res == .handled);
-        try testing.expect(!res.handled.is_error());
+        try testing.expect(res == .reply);
+        try testing.expect(!res.is_error());
 
-        const vfd: FdTable.VirtualFD = @intCast(res.handled.val);
+        const vfd: FdTable.VirtualFD = @intCast(res.reply.val);
         try testing.expectEqual(@as(FdTable.VirtualFD, 3), vfd);
 
         // Get the FD and write to it
@@ -565,10 +565,10 @@ test "openat O_CREAT creates file, write and read back" {
 
         const parsed = try Self.parse(notif);
         const res = try parsed.handle(&supervisor);
-        try testing.expect(res == .handled);
-        try testing.expect(!res.handled.is_error());
+        try testing.expect(res == .reply);
+        try testing.expect(!res.is_error());
 
-        const vfd: FdTable.VirtualFD = @intCast(res.handled.val);
+        const vfd: FdTable.VirtualFD = @intCast(res.reply.val);
 
         // Read via FD.read
         const proc = supervisor.virtual_procs.procs.get(child_pid).?;

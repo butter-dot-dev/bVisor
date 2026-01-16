@@ -1,13 +1,13 @@
 const std = @import("std");
 const linux = std.os.linux;
 const posix = std.posix;
-const types = @import("../../types.zig");
+const types = @import("../../../types.zig");
 const KernelFD = types.KernelFD;
 const Result = @import("../syscall.zig").Syscall.Result;
-const Supervisor = @import("../../Supervisor.zig");
+const Supervisor = @import("../../../Supervisor.zig");
 
 // comptime dependency injection
-const deps = @import("../../deps/deps.zig");
+const deps = @import("../../../deps/deps.zig");
 const memory_bridge = deps.memory_bridge;
 
 const Self = @This();
@@ -76,9 +76,9 @@ pub fn handle(self: Self, supervisor: *Supervisor) !Result {
         },
         else => {
             logger.log("writev: passthrough for non-stdout/stderr fd={d}", .{self.fd});
-            return .{ .passthrough = {} };
+            return .use_kernel;
         },
     }
 
-    return .{ .handled = Result.Handled.success(@intCast(self.data_len)) };
+    return Result.reply_success(@intCast(self.data_len));
 }
