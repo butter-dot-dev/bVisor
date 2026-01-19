@@ -166,3 +166,54 @@ test "FdTable remove" {
     const removed_again = table.remove(10);
     try testing.expect(!removed_again);
 }
+
+test "CLONE_FILES set - shared table, changes visible to both" {
+    const allocator = testing.allocator;
+
+    const parent_table = try Self.init(allocator);
+    defer parent_table.unref();
+
+    // Child with CLONE_FILES shares the table (ref, not clone)
+    const child_table = parent_table.ref();
+    defer child_table.unref();
+
+    try testing.expect(parent_table == child_table);
+    try testing.expectEqual(@as(usize, 2), parent_table.ref_count);
+
+    // Parent opens a file - child can see it
+    const vfd1 = try parent_table.open(.{ .proc = .{ .self = .{ .pid = 1 } } });
+    try testing.expect(child_table.get(vfd1) != null);
+
+    // Child opens a file - parent can see it
+    const vfd2 = try child_table.open(.{ .proc = .{ .self = .{ .pid = 2 } } });
+    try testing.expect(parent_table.get(vfd2) != null);
+
+    // Child closes a file - parent also loses it
+    _ = child_table.remove(vfd1);
+    try testing.expect(parent_table.get(vfd1) == null);
+}
+
+test "CLONE_FILES not set - cloned table, changes independent" {
+    const allocator = testing.allocator;
+
+    const parent_table = try Self.init(allocator);
+    defer parent_table.unref();
+
+    const vfd1 = try parent_table.open(.{ .proc = .{ .self = .{ .pid = 1 } } });
+
+    // Child without CLONE_FILES gets a clone
+    const child_table = try parent_table.clone();
+    defer child_table.unref();
+
+    try testing.expect(parent_table != child_table);
+    try testing.expectEqual(@as(usize, 1), parent_table.ref_count);
+    try testing.expectEqual(@as(usize, 1), child_table.ref_count);
+
+    // Child inherited the file
+    try testing.expect(child_table.get(vfd1) != null);
+
+    // Child closes inherited file - parent still has it
+    _ = child_table.remove(vfd1);
+    try testing.expect(parent_table.get(vfd1) != null);
+    try testing.expect(child_table.get(vfd1) == null);
+}
