@@ -31,11 +31,10 @@ pub fn read_ppid(pid: KernelPID) !KernelPID {
     while (lines.next()) |line| {
         if (std.mem.startsWith(u8, line, "PPid:")) {
             const ppid_str = std.mem.trim(u8, line[5..], " \t");
-            return std.fmt.parseInt(KernelPID, ppid_str, 10) catch return error.CannotReadProc;
+            return std.fmt.parseInt(KernelPID, ppid_str, 10) catch return error.ProcNotInKernel;
         }
     }
-
-    return error.CannotReadProc;
+    return error.ProcNotInKernel;
 }
 
 /// Detect clone flags by querying kernel state

@@ -212,10 +212,7 @@ fn handleVirtualizeProc(self: Self, supervisor: *Supervisor) !Result {
     const logger = supervisor.logger;
 
     // Look up the calling process
-    const proc = supervisor.virtual_procs.lookup.get(self.kernel_pid) orelse {
-        logger.log("openat: kernel pid {d} not found in virtual_procs", .{self.kernel_pid});
-        return Result.reply_err(.NOENT);
-    };
+    const proc = try supervisor.virtual_procs.get(self.kernel_pid);
 
     // Parse the /proc path to get target pid
     const path_str = self.path();
