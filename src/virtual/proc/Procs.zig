@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const linux = std.os.linux;
 const Allocator = std.mem.Allocator;
 
@@ -20,9 +19,9 @@ pub const CloneFlags = struct {
 
     /// Returns error if unsupported namespace flags are set
     pub fn check_supported(self: CloneFlags) !void {
-        if (self.raw & linux.CLONE.NEWUSER != 0) return error.UnsupportedUserNamespace;
-        if (self.raw & linux.CLONE.NEWNET != 0) return error.UnsupportedNetNamespace;
-        if (self.raw & linux.CLONE.NEWNS != 0) return error.UnsupportedMountNamespace;
+        if (self.raw & linux.CLONE.NEWUSER != 0) return error.UnsupportedCloneFlag;
+        if (self.raw & linux.CLONE.NEWNET != 0) return error.UnsupportedCloneFlag;
+        if (self.raw & linux.CLONE.NEWNS != 0) return error.UnsupportedCloneFlag;
     }
 
     pub fn from(raw: u64) CloneFlags {
@@ -74,29 +73,51 @@ pub fn deinit(self: *Self) void {
     self.lookup.deinit(self.allocator);
 }
 
-pub const GetError = error{
-    NotInSandbox,
-    CannotReadProc,
-    OutOfMemory,
-    UnsupportedUserNamespace,
-    UnsupportedNetNamespace,
-    UnsupportedMountNamespace,
-};
-
 /// Get a proc by kernel PID. Performs a kernel lookup for unknown children.
-pub fn get(self: *Self, pid: KernelPID) GetError!*Proc {
+pub fn get(self: *Self, pid: KernelPID) !*Proc {
+    // proc already in our tree
     if (self.lookup.get(pid)) |proc| return proc;
-    return self.register_from_kernel(pid);
-}
 
-fn register_from_kernel(self: *Self, child_pid: KernelPID) GetError!*Proc {
-    const ppid = proc_info.read_ppid(child_pid) catch return error.CannotReadProc;
-    const parent = self.get(ppid) catch return error.NotInSandbox;
+    // proc not in our tree. It and (maybe) its ancestors need to get registered.
 
-    // Query kernel for actual clone flags used
-    const flags = proc_info.detect_clone_flags(ppid, child_pid);
+    // walk the kernel API until we hit a known process
+    // note: must protect against escapes where init_pid is not in the lineage
+    var lineage: std.ArrayList(KernelPID) = try .initCapacity(self.allocator, 10);
+    defer lineage.deinit(self.allocator);
 
-    return self.register_child(parent, child_pid, flags);
+    var child_pid = pid;
+    var nearest_registered_proc: ?*Proc = null;
+    while (true) {
+        try lineage.append(self.allocator, child_pid);
+
+        // ask kernel for parent pid
+        const ppid = try proc_info.read_ppid(child_pid);
+
+        // check if parent in our tree
+        if (self.lookup.get(ppid)) |parent_proc| {
+            // no need to walk higher
+            nearest_registered_proc = parent_proc;
+            break;
+        }
+
+        if (ppid <= 1) return error.ProcNotInSandbox; // escaped past init_pid
+
+        child_pid = ppid;
+    }
+
+    if (nearest_registered_proc == null) unreachable;
+
+    // if no error, lineage is fully in sandbox
+    // register any unknown procs in reverse order
+    var current_parent = nearest_registered_proc.?;
+    var i = lineage.items.len;
+    while (i > 0) : (i -= 1) {
+        child_pid = lineage.items[i - 1];
+        const flags = proc_info.detect_clone_flags(current_parent.pid, child_pid);
+        current_parent = try self.register_child(current_parent, child_pid, flags);
+    }
+
+    return current_parent;
 }
 
 /// Register the initial sandbox root process
@@ -629,7 +650,7 @@ test "out-of-order with clone flags" {
     try std.testing.expect(proc_100.namespace != proc_200.namespace);
 }
 
-test "out-of-order fails for process outside sandbox" {
+test "out-of-order fails for process outside sandbox escaping to 1" {
     const allocator = std.testing.allocator;
     var v_procs = Self.init(allocator);
     defer v_procs.deinit();
@@ -641,8 +662,28 @@ test "out-of-order fails for process outside sandbox" {
     // Setup mock: 300 has parent 200, but 200's parent (999) is not in sandbox
     try proc_info.testing.setup_parent(allocator, 300, 200);
     try proc_info.testing.setup_parent(allocator, 200, 999);
-    // Note: 999 is not in our sandbox (no parent mapping)
+    // Note: 999 is not in our sandbox, its lineage escapes up to pid 1 or 0
+    try proc_info.testing.setup_parent(allocator, 999, 1);
+    try proc_info.testing.setup_parent(allocator, 1, 0);
 
     // 300 syscalls - should fail because chain leads outside sandbox
-    try std.testing.expectError(error.NotInSandbox, v_procs.get(300));
+    try std.testing.expectError(error.ProcNotInSandbox, v_procs.get(300));
+}
+
+test "out-of-order fails for process outside sandbox escaping to nonexistant kernel pid" {
+    const allocator = std.testing.allocator;
+    var v_procs = Self.init(allocator);
+    defer v_procs.deinit();
+    defer proc_info.testing.reset(allocator);
+
+    // Register root process 100
+    try v_procs.handle_initial_process(100);
+
+    // Setup mock: 300 has parent 200, but 200's parent (999) is not in sandbox
+    try proc_info.testing.setup_parent(allocator, 300, 200);
+    try proc_info.testing.setup_parent(allocator, 200, 999);
+    // say 999 has no parent in the kernel
+
+    // 300 syscalls - should fail because chain fails due to proc not in kernel
+    try std.testing.expectError(error.ProcNotInKernel, v_procs.get(300));
 }

@@ -212,10 +212,7 @@ fn handleVirtualizeProc(self: Self, supervisor: *Supervisor) !Result {
     const logger = supervisor.logger;
 
     // Look up the calling process
-    const proc = supervisor.virtual_procs.lookup.get(self.kernel_pid) orelse {
-        logger.log("openat: kernel pid {d} not found in virtual_procs", .{self.kernel_pid});
-        return Result.reply_err(.NOENT);
-    };
+    const proc = try supervisor.virtual_procs.get(self.kernel_pid);
 
     // Parse the /proc path to get target pid
     const path_str = self.path();
@@ -233,6 +230,16 @@ fn handleVirtualizeProc(self: Self, supervisor: *Supervisor) !Result {
             // Not a numeric pid - global proc file (e.g., meminfo, cpuinfo)
             // Use caller's pid as placeholder
             proc.pid;
+
+    // Ensure calling proc can see target proc
+    const target_proc = supervisor.virtual_procs.get(target_pid) catch |err| switch (err) {
+        error.ProcNotInSandbox => return Result.reply_err(.PERM),
+        else => return Result.reply_err(.SRCH),
+    };
+
+    if (!proc.can_see(target_proc)) {
+        return Result.reply_err(.NOENT);
+    }
 
     const virtual_fd = FD{ .proc = .{ .self = .{ .pid = target_pid } } };
 

@@ -12,7 +12,7 @@ pub var mock_clone_flags: std.AutoHashMapUnmanaged(KernelPID, CloneFlags) = .emp
 
 /// Read parent PID from mock map
 pub fn read_ppid(pid: KernelPID) !KernelPID {
-    return mock_ppid_map.get(pid) orelse error.CannotReadProc;
+    return mock_ppid_map.get(pid) orelse error.ProcNotInKernel;
 }
 
 /// Return mock clone flags for a child
