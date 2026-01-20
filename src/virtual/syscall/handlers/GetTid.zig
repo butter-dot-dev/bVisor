@@ -18,8 +18,11 @@ pub fn parse(notif: linux.SECCOMP.notif) Self {
 /// For now, return pid as tid. This is correct for single-threaded processes
 /// where tid == pid. Multi-threaded support would need per-thread tracking.
 pub fn handle(self: Self, supervisor: *Supervisor) !Result {
-    const proc = supervisor.virtual_procs.get(self.kernel_pid) catch
-        return Result.reply_err(.SRCH);
+    const proc = supervisor.virtual_procs.get(self.kernel_pid) catch |err| {
+        // gettid() never fails in the kernel - if we can't find the process,
+        // it's a supervisor invariant violation
+        std.debug.panic("gettid: supervisor invariant violated - kernel pid {d} not in virtual_procs: {}", .{ self.kernel_pid, err });
+    };
     return Result.reply_success(@intCast(proc.pid));
 }
 

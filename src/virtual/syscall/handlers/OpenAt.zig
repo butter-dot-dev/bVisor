@@ -232,10 +232,9 @@ fn handleVirtualizeProc(self: Self, supervisor: *Supervisor) !Result {
             proc.pid;
 
     // Ensure calling proc can see target proc
-    const target_proc = supervisor.virtual_procs.get(target_pid) catch |err| switch (err) {
-        error.ProcNotInSandbox => return Result.reply_err(.PERM),
-        else => return Result.reply_err(.SRCH),
-    };
+    // Return ENOENT for all lookup failures - matches how Linux /proc hides inaccessible processes
+    const target_proc = supervisor.virtual_procs.get(target_pid) catch
+        return Result.reply_err(.NOENT);
 
     if (!proc.can_see(target_proc)) {
         return Result.reply_err(.NOENT);
@@ -256,8 +255,8 @@ fn handleAllow(self: Self, supervisor: *Supervisor) !Result {
 
     // Look up the calling process
     const proc = supervisor.virtual_procs.lookup.get(self.kernel_pid) orelse {
-        logger.log("openat: kernel pid {d} not found in virtual_procs", .{self.kernel_pid});
-        return Result.reply_err(.NOENT);
+        // If the calling process isn't tracked, it's a supervisor invariant violation
+        std.debug.panic("openat: supervisor invariant violated - kernel pid {d} not in virtual_procs", .{self.kernel_pid});
     };
 
     // Perform the open ourselves using posix (works on both Linux and macOS for tests)

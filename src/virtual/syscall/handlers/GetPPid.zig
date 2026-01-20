@@ -16,8 +16,11 @@ pub fn parse(notif: linux.SECCOMP.notif) Self {
 }
 
 pub fn handle(self: Self, supervisor: *Supervisor) !Result {
-    const proc = supervisor.virtual_procs.get(self.kernel_pid) catch
-        return Result.reply_err(.SRCH);
+    const proc = supervisor.virtual_procs.get(self.kernel_pid) catch |err| {
+        // getppid() never fails in the kernel - if we can't find the process,
+        // it's a supervisor invariant violation
+        std.debug.panic("getppid: supervisor invariant violated - kernel pid {d} not in virtual_procs: {}", .{ self.kernel_pid, err });
+    };
 
     // Return parent's kernel PID, or 0 if:
     // - No parent (sandbox root)

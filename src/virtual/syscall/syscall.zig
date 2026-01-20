@@ -181,7 +181,7 @@ const Blocked = struct {
 
     pub fn handle(self: Self, supervisor: *Supervisor) !Syscall.Result {
         supervisor.logger.log("Blocked syscall: {d} from pid {d}", .{ self.sys_nr, self.pid });
-        return Syscall.Result.reply_err(.PERM);
+        return Syscall.Result.reply_err(.NOSYS);
     }
 };
 

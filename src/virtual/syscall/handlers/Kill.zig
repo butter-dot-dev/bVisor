@@ -25,7 +25,7 @@ pub fn parse(notif: linux.SECCOMP.notif) Self {
 pub fn handle(self: Self, supervisor: *Supervisor) !Result {
     // Negative PIDs (process groups) not supported
     if (self.target_pid <= 0) {
-        return Result.reply_err(.NOSYS);
+        return Result.reply_err(.INVAL);
     }
 
     const caller = supervisor.virtual_procs.get(self.kernel_pid) catch
@@ -66,7 +66,7 @@ test "parse extracts target pid and signal" {
     try testing.expectEqual(@as(u6, 9), parsed.signal);
 }
 
-test "kill with negative pid returns ENOSYS" {
+test "kill with negative pid returns EINVAL" {
     const allocator = testing.allocator;
     var supervisor = try Supervisor.init(allocator, -1, 100);
     defer supervisor.deinit();
@@ -81,10 +81,10 @@ test "kill with negative pid returns ENOSYS" {
     const res = try parsed.handle(&supervisor);
 
     try testing.expect(res.is_error());
-    try testing.expectEqual(@as(i32, @intFromEnum(linux.E.NOSYS)), res.reply.errno);
+    try testing.expectEqual(@as(i32, @intFromEnum(linux.E.INVAL)), res.reply.errno);
 }
 
-test "kill with zero pid returns ENOSYS" {
+test "kill with zero pid returns EINVAL" {
     const allocator = testing.allocator;
     var supervisor = try Supervisor.init(allocator, -1, 100);
     defer supervisor.deinit();
@@ -99,5 +99,5 @@ test "kill with zero pid returns ENOSYS" {
     const res = try parsed.handle(&supervisor);
 
     try testing.expect(res.is_error());
-    try testing.expectEqual(@as(i32, @intFromEnum(linux.E.NOSYS)), res.reply.errno);
+    try testing.expectEqual(@as(i32, @intFromEnum(linux.E.INVAL)), res.reply.errno);
 }
