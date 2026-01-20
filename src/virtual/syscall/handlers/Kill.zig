@@ -11,7 +11,7 @@ const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
 const Self = @This();
 
 kernel_pid: Proc.KernelPID, // caller's kernel pid
-target_pid: Proc.KernelPID, // arg0 (pid_t pid) - now kernel PID
+target_pid: Proc.KernelPID, // arg0 (pid_t pid)
 signal: u6, // arg1 (int sig)
 
 pub fn parse(notif: linux.SECCOMP.notif) Self {
@@ -28,15 +28,13 @@ pub fn handle(self: Self, supervisor: *Supervisor) !Result {
         return Result.reply_err(.NOSYS);
     }
 
-    // Get caller's process (lazy registration if needed)
     const caller = supervisor.virtual_procs.get(self.kernel_pid) catch
         return Result.reply_err(.SRCH);
 
-    // Get target process (lazy registration if needed)
     const target = supervisor.virtual_procs.get(self.target_pid) catch
         return Result.reply_err(.SRCH);
 
-    // Check visibility - caller must be able to see target
+    // Caller must be able to see target
     if (!caller.can_see(target)) {
         return Result.reply_err(.SRCH);
     }

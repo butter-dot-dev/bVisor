@@ -18,7 +18,6 @@ pub fn parse(notif: linux.SECCOMP.notif) Self {
 /// For now, return pid as tid. This is correct for single-threaded processes
 /// where tid == pid. Multi-threaded support would need per-thread tracking.
 pub fn handle(self: Self, supervisor: *Supervisor) !Result {
-    // Use get() which does lazy registration if needed
     const proc = supervisor.virtual_procs.get(self.kernel_pid) catch
         return Result.reply_err(.SRCH);
     return Result.reply_success(@intCast(proc.pid));

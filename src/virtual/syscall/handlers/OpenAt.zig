@@ -108,8 +108,7 @@ pub fn resolve(path_str: []const u8) !Action {
 }
 
 /// Check if path matches a directory prefix (handles trailing slash variations)
-/// Matches: /tmp -> /tmp, /tmp/, /tmp/foo but NOT /tmpfoo
-/// Returns remainder after prefix (e.g., /tmp/foo with /tmp returns "foo"), or null if no match
+/// Returns remainder after prefix, or null if no match
 fn matchesPrefix(path_str: []const u8, prefix: []const u8) ?[]const u8 {
     if (!std.mem.startsWith(u8, path_str, prefix)) return null;
     if (path_str.len == prefix.len) return ""; // exact match
