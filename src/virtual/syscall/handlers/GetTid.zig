@@ -29,7 +29,7 @@ pub fn handle(self: Self, supervisor: *Supervisor) !Result {
 test "gettid returns kernel pid for main thread" {
     const allocator = testing.allocator;
     const kernel_pid: Proc.KernelPID = 12345;
-    var supervisor = try Supervisor.init(allocator, -1, kernel_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, kernel_pid);
     defer supervisor.deinit();
 
     const notif = makeNotif(.gettid, .{ .pid = kernel_pid });

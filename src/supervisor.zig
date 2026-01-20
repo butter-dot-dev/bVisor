@@ -1,6 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
 const posix = std.posix;
+const Io = std.Io;
 const types = @import("types.zig");
 const Notification = @import("seccomp/Notification.zig");
 const KernelFD = types.KernelFD;
@@ -14,6 +15,7 @@ const Allocator = std.mem.Allocator;
 const Self = @This();
 
 allocator: Allocator,
+io: Io,
 init_child_pid: linux.pid_t,
 notify_fd: KernelFD,
 logger: Logger,
@@ -27,7 +29,7 @@ cow: Cow,
 // Private /tmp for sandbox isolation
 tmp: Tmp,
 
-pub fn init(allocator: Allocator, notify_fd: KernelFD, child_pid: linux.pid_t) !Self {
+pub fn init(allocator: Allocator, io: Io, notify_fd: KernelFD, child_pid: linux.pid_t) !Self {
     const logger = Logger.init(.supervisor);
     var virtual_procs = Procs.init(allocator);
     errdefer virtual_procs.deinit();
@@ -36,14 +38,15 @@ pub fn init(allocator: Allocator, notify_fd: KernelFD, child_pid: linux.pid_t) !
     // Generate shared UID for all sandbox directories
     const uid = Cow.generateUid();
 
-    var cow = try Cow.init(uid);
-    errdefer cow.deinit();
+    var cow = try Cow.init(io, uid);
+    errdefer cow.deinit(io);
 
-    var tmp = try Tmp.init(uid);
-    errdefer tmp.deinit();
+    var tmp = try Tmp.init(io, uid);
+    errdefer tmp.deinit(io);
 
     return .{
         .allocator = allocator,
+        .io = io,
         .init_child_pid = child_pid,
         .notify_fd = notify_fd,
         .logger = logger,
@@ -58,8 +61,8 @@ pub fn deinit(self: *Self) void {
         posix.close(self.notify_fd);
     }
     self.virtual_procs.deinit();
-    self.cow.deinit();
-    self.tmp.deinit();
+    self.cow.deinit(self.io);
+    self.tmp.deinit(self.io);
 }
 
 /// Main notification loop. Reads syscall notifications from the kernel,

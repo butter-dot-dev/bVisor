@@ -44,7 +44,7 @@ test "handle returns use_kernel" {
     const allocator = testing.allocator;
 
     const initial_pid = 100;
-    var supervisor = try Supervisor.init(allocator, -1, initial_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, initial_pid);
     defer supervisor.deinit();
 
     const handler = Self{

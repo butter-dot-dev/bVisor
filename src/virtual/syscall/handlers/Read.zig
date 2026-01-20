@@ -72,7 +72,7 @@ pub fn handle(self: Self, supervisor: *Supervisor) !Result {
 test "read from proc fd returns pid" {
     const allocator = testing.allocator;
     const child_pid: Proc.KernelPID = 100;
-    var supervisor = try Supervisor.init(allocator, -1, child_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, child_pid);
     defer supervisor.deinit();
 
     // First open a /proc/self fd
@@ -109,7 +109,7 @@ test "read from proc fd returns pid" {
 test "read from invalid fd returns EBADF" {
     const allocator = testing.allocator;
     const child_pid: Proc.KernelPID = 100;
-    var supervisor = try Supervisor.init(allocator, -1, child_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, child_pid);
     defer supervisor.deinit();
 
     var child_buf: [64]u8 = undefined;
@@ -129,7 +129,7 @@ test "read from invalid fd returns EBADF" {
 test "read from stdin returns use_kernel" {
     const allocator = testing.allocator;
     const child_pid: Proc.KernelPID = 100;
-    var supervisor = try Supervisor.init(allocator, -1, child_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, child_pid);
     defer supervisor.deinit();
 
     var child_buf: [64]u8 = undefined;

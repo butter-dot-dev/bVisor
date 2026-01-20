@@ -82,7 +82,7 @@ pub fn handle(self: Self, supervisor: *Supervisor) !Result {
 test "write to stdout returns success" {
     const allocator = testing.allocator;
     const child_pid: Proc.KernelPID = 100;
-    var supervisor = try Supervisor.init(allocator, -1, child_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, child_pid);
     defer supervisor.deinit();
 
     const test_data = "hello stdout";
@@ -102,7 +102,7 @@ test "write to stdout returns success" {
 test "write to stderr returns success" {
     const allocator = testing.allocator;
     const child_pid: Proc.KernelPID = 100;
-    var supervisor = try Supervisor.init(allocator, -1, child_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, child_pid);
     defer supervisor.deinit();
 
     const test_data = "hello stderr";
@@ -122,7 +122,7 @@ test "write to stderr returns success" {
 test "write to invalid fd returns EBADF" {
     const allocator = testing.allocator;
     const child_pid: Proc.KernelPID = 100;
-    var supervisor = try Supervisor.init(allocator, -1, child_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, child_pid);
     defer supervisor.deinit();
 
     const test_data = "test";
@@ -142,7 +142,7 @@ test "write to invalid fd returns EBADF" {
 test "write to kernel fd works" {
     const allocator = testing.allocator;
     const child_pid: Proc.KernelPID = 100;
-    var supervisor = try Supervisor.init(allocator, -1, child_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, child_pid);
     defer supervisor.deinit();
 
     // Create a temp file and open it
