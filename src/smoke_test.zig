@@ -9,7 +9,7 @@ const linux = std.os.linux;
 /// Many tests will fail initially - that's expected and guides implementation.
 ///
 /// Run with: docker run --rm --cap-add=SYS_PTRACE -v ./zig-out:/zig-out alpine /zig-out/bin/bVisor
-pub fn smoke_test(_: std.Io) void {
+pub fn smokeTest(_: std.Io) void {
     std.debug.print("\n=== bVisor Smoke Test Scorecard ===\n\n", .{});
 
     const tests = .{

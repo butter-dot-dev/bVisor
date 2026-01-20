@@ -36,8 +36,8 @@ test "parse extracts clone flags" {
 
     const parsed = try Self.parse(notif);
     try testing.expectEqual(@as(Proc.KernelPID, 100), parsed.parent_pid);
-    try testing.expect(parsed.clone_flags.create_pid_namespace());
-    try testing.expect(parsed.clone_flags.share_files());
+    try testing.expect(parsed.clone_flags.createPidNamespace());
+    try testing.expect(parsed.clone_flags.shareFiles());
 }
 
 test "handle returns use_kernel" {

@@ -25,18 +25,18 @@ pub fn parse(notif: linux.SECCOMP.notif) Self {
 pub fn handle(self: Self, supervisor: *Supervisor) !Result {
     // Negative PIDs (process groups) not supported
     if (self.target_pid <= 0) {
-        return Result.reply_err(.INVAL);
+        return Result.replyErr(.INVAL);
     }
 
     const caller = supervisor.virtual_procs.get(self.kernel_pid) catch
-        return Result.reply_err(.SRCH);
+        return Result.replyErr(.SRCH);
 
     const target = supervisor.virtual_procs.get(self.target_pid) catch
-        return Result.reply_err(.SRCH);
+        return Result.replyErr(.SRCH);
 
     // Caller must be able to see target
-    if (!caller.can_see(target)) {
-        return Result.reply_err(.SRCH);
+    if (!caller.canSee(target)) {
+        return Result.replyErr(.SRCH);
     }
 
     // Execute real kill syscall
@@ -47,10 +47,10 @@ pub fn handle(self: Self, supervisor: *Supervisor) !Result {
             error.ProcessNotFound => .SRCH,
             else => .INVAL,
         };
-        return Result.reply_err(errno);
+        return Result.replyErr(errno);
     };
 
-    return Result.reply_success(0);
+    return Result.replySuccess(0);
 }
 
 test "parse extracts target pid and signal" {
@@ -80,7 +80,7 @@ test "kill with negative pid returns EINVAL" {
     const parsed = Self.parse(notif);
     const res = try parsed.handle(&supervisor);
 
-    try testing.expect(res.is_error());
+    try testing.expect(res.isError());
     try testing.expectEqual(@as(i32, @intFromEnum(linux.E.INVAL)), res.reply.errno);
 }
 
@@ -98,6 +98,6 @@ test "kill with zero pid returns EINVAL" {
     const parsed = Self.parse(notif);
     const res = try parsed.handle(&supervisor);
 
-    try testing.expect(res.is_error());
+    try testing.expect(res.isError());
     try testing.expectEqual(@as(i32, @intFromEnum(linux.E.INVAL)), res.reply.errno);
 }

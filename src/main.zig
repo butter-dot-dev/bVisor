@@ -1,8 +1,8 @@
 const std = @import("std");
 const types = @import("types.zig");
 const Logger = types.Logger;
-const setup_and_run = @import("setup.zig").setup_and_run;
-const smoke_test = @import("smoke_test.zig").smoke_test;
+const setupAndRun = @import("setup.zig").setupAndRun;
+const smokeTest = @import("smoke_test.zig").smokeTest;
 
 test {
     _ = @import("Supervisor.zig");
@@ -22,5 +22,5 @@ pub fn main() !void {
 
     // Run the smoke test inside the sandbox
     logger.log("Running smoke test with syscall interception:", .{});
-    try setup_and_run(smoke_test);
+    try setupAndRun(smokeTest);
 }

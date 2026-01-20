@@ -195,7 +195,7 @@ pub fn handle(self: Self, supervisor: *Supervisor) !Result {
     switch (action) {
         .block => {
             logger.log("openat: blocked path: {s}", .{self.path()});
-            return Result.reply_err(.PERM);
+            return Result.replyErr(.PERM);
         },
         .allow => {
             logger.log("openat: allowed path: {s}", .{self.path()});
@@ -219,7 +219,7 @@ fn handleVirtualizeProc(self: Self, supervisor: *Supervisor) !Result {
 
     var parts = std.mem.tokenizeScalar(u8, path_str, '/');
     _ = parts.next(); // skip "proc"
-    const pid_part = parts.next() orelse return Result.reply_err(.NOENT);
+    const pid_part = parts.next() orelse return Result.replyErr(.NOENT);
 
     // Determine target pid
     // Format: /proc/self/..., /proc/<pid>/..., or global files like /proc/meminfo
@@ -234,10 +234,10 @@ fn handleVirtualizeProc(self: Self, supervisor: *Supervisor) !Result {
     // Ensure calling proc can see target proc
     // Return ENOENT for all lookup failures - matches how Linux /proc hides inaccessible processes
     const target_proc = supervisor.virtual_procs.get(target_pid) catch
-        return Result.reply_err(.NOENT);
+        return Result.replyErr(.NOENT);
 
-    if (!proc.can_see(target_proc)) {
-        return Result.reply_err(.NOENT);
+    if (!proc.canSee(target_proc)) {
+        return Result.replyErr(.NOENT);
     }
 
     const virtual_fd = FD{ .proc = .{ .self = .{ .pid = target_pid } } };
@@ -247,7 +247,7 @@ fn handleVirtualizeProc(self: Self, supervisor: *Supervisor) !Result {
 
     logger.log("openat: opened virtual fd={d}", .{vfd});
 
-    return Result.reply_success(@intCast(vfd));
+    return Result.replySuccess(@intCast(vfd));
 }
 
 fn handleAllow(self: Self, supervisor: *Supervisor) !Result {
@@ -269,7 +269,7 @@ fn handleAllow(self: Self, supervisor: *Supervisor) !Result {
     const kfd = posix.openat(self.dirfd, path_slice, posix_flags, @truncate(self.mode)) catch |err| {
         const errno = posixErrorToLinuxErrno(err);
         logger.log("openat: kernel open failed: {s}", .{@tagName(errno)});
-        return Result.reply_err(errno);
+        return Result.replyErr(errno);
     };
 
     // Store in fd_table as kernel fd
@@ -277,7 +277,7 @@ fn handleAllow(self: Self, supervisor: *Supervisor) !Result {
 
     logger.log("openat: opened kernel fd={d} as vfd={d}", .{ kfd, vfd });
 
-    return Result.reply_success(@intCast(vfd));
+    return Result.replySuccess(@intCast(vfd));
 }
 
 test "openat blocks /sys and /run paths" {
@@ -302,7 +302,7 @@ test "openat blocks /sys and /run paths" {
         const parsed = try Self.parse(notif);
         const res = try parsed.handle(&supervisor);
         try testing.expect(res == .reply);
-        try testing.expect(res.is_error());
+        try testing.expect(res.isError());
     }
 }
 
@@ -329,7 +329,7 @@ test "openat virtualizes /proc paths" {
     const parsed = try Self.parse(notif);
     const res = try parsed.handle(&supervisor);
     try testing.expect(res == .reply);
-    try testing.expect(!res.is_error());
+    try testing.expect(!res.isError());
 }
 
 test "openat handles allowed paths (returns NOENT for missing file)" {
@@ -348,7 +348,7 @@ test "openat handles allowed paths (returns NOENT for missing file)" {
     const parsed = try Self.parse(notif);
     const res = try parsed.handle(&supervisor);
     try testing.expect(res == .reply);
-    try testing.expect(res.is_error());
+    try testing.expect(res.isError());
     try testing.expectEqual(linux.E.NOENT, @as(linux.E, @enumFromInt(res.reply.errno)));
 }
 
@@ -383,7 +383,7 @@ test "openat O_CREAT creates file, write and read back" {
         const parsed = try Self.parse(notif);
         const res = try parsed.handle(&supervisor);
         try testing.expect(res == .reply);
-        try testing.expect(!res.is_error());
+        try testing.expect(!res.isError());
 
         const vfd: FdTable.VirtualFD = @intCast(res.reply.val);
         try testing.expectEqual(@as(FdTable.VirtualFD, 3), vfd);
@@ -409,7 +409,7 @@ test "openat O_CREAT creates file, write and read back" {
         const parsed = try Self.parse(notif);
         const res = try parsed.handle(&supervisor);
         try testing.expect(res == .reply);
-        try testing.expect(!res.is_error());
+        try testing.expect(!res.isError());
 
         const vfd: FdTable.VirtualFD = @intCast(res.reply.val);
 

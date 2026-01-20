@@ -12,7 +12,7 @@ const Allocator = std.mem.Allocator;
 const Self = @This();
 
 allocator: Allocator,
-init_child_pid: linux.pid_t,
+initChildPid: linux.pid_t,
 notify_fd: KernelFD,
 logger: Logger,
 
@@ -24,8 +24,8 @@ pub fn init(allocator: Allocator, notify_fd: KernelFD, child_pid: linux.pid_t) !
     const logger = Logger.init(.supervisor);
     var virtual_procs = Procs.init(allocator);
     errdefer virtual_procs.deinit();
-    _ = try virtual_procs.handle_initial_process(child_pid);
-    return .{ .allocator = allocator, .init_child_pid = child_pid, .notify_fd = notify_fd, .logger = logger, .virtual_procs = virtual_procs };
+    _ = try virtual_procs.handleInitialProcess(child_pid);
+    return .{ .allocator = allocator, .initChildPid = child_pid, .notify_fd = notify_fd, .logger = logger, .virtual_procs = virtual_procs };
 }
 
 pub fn deinit(self: *Self) void {
@@ -41,13 +41,13 @@ pub fn run(self: *Self) !void {
         // Receive syscall notification from kernel
         const notif = try self.recv() orelse return;
 
-        const notification = try Notification.from_notif(notif);
+        const notification = try Notification.fromNotif(notif);
 
         // Handle (or prepare passthrough resp)
-        const response = try notification.handle_syscall(self);
+        const response = try notification.handleSyscall(self);
 
         // Reply to kernel
-        try self.send(response.to_notif_resp());
+        try self.send(response.toNotifResp());
     }
 }
 

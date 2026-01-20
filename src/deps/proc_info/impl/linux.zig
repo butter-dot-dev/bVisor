@@ -12,7 +12,7 @@ pub const CloneFlags = @import("../../../virtual/proc/Procs.zig").CloneFlags;
 const KCMP_FILES: u5 = 2;
 
 /// Read parent PID from /proc/[pid]/status
-pub fn read_ppid(pid: KernelPID) !KernelPID {
+pub fn readPpid(pid: KernelPID) !KernelPID {
     var path_buf: [32:0]u8 = undefined;
     const path = std.fmt.bufPrintZ(&path_buf, "/proc/{d}/status", .{pid}) catch unreachable;
 
@@ -38,16 +38,16 @@ pub fn read_ppid(pid: KernelPID) !KernelPID {
 }
 
 /// Detect clone flags by querying kernel state
-pub fn detect_clone_flags(parent_pid: KernelPID, child_pid: KernelPID) CloneFlags {
+pub fn detectCloneFlags(parent_pid: KernelPID, child_pid: KernelPID) CloneFlags {
     var flags: u64 = 0;
 
     // Check CLONE_NEWPID via namespace inode comparison
-    if (!same_pid_namespace(parent_pid, child_pid)) {
+    if (!samePidNamespace(parent_pid, child_pid)) {
         flags |= linux.CLONE.NEWPID;
     }
 
     // Check CLONE_FILES via kcmp syscall
-    if (shares_fd_table(parent_pid, child_pid)) {
+    if (sharesFdTable(parent_pid, child_pid)) {
         flags |= linux.CLONE.FILES;
     }
 
@@ -55,14 +55,14 @@ pub fn detect_clone_flags(parent_pid: KernelPID, child_pid: KernelPID) CloneFlag
 }
 
 /// Check if two processes share the same PID namespace
-fn same_pid_namespace(pid1: KernelPID, pid2: KernelPID) bool {
-    const ino1 = get_ns_inode(pid1, "pid") orelse return true;
-    const ino2 = get_ns_inode(pid2, "pid") orelse return true;
+fn samePidNamespace(pid1: KernelPID, pid2: KernelPID) bool {
+    const ino1 = getNsInode(pid1, "pid") orelse return true;
+    const ino2 = getNsInode(pid2, "pid") orelse return true;
     return ino1 == ino2;
 }
 
 /// Get namespace inode for a process
-fn get_ns_inode(pid: KernelPID, ns_type: []const u8) ?u64 {
+fn getNsInode(pid: KernelPID, ns_type: []const u8) ?u64 {
     var path_buf: [64:0]u8 = undefined;
     const path = std.fmt.bufPrintZ(&path_buf, "/proc/{d}/ns/{s}", .{ pid, ns_type }) catch return null;
 
@@ -79,7 +79,7 @@ fn get_ns_inode(pid: KernelPID, ns_type: []const u8) ?u64 {
 }
 
 /// Check if two processes share the same fd table using kcmp
-fn shares_fd_table(pid1: KernelPID, pid2: KernelPID) bool {
+fn sharesFdTable(pid1: KernelPID, pid2: KernelPID) bool {
     // kcmp returns: 0 = equal, positive = different, negative = error
     // Only 0 means they share the same fd table
     const result = linux.syscall5(

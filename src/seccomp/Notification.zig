@@ -15,7 +15,7 @@ backend: union(enum) {
 },
 
 /// Parse a linux.SECCOMP.notif into a Notification
-pub fn from_notif(notif: linux.SECCOMP.notif) !Self {
+pub fn fromNotif(notif: linux.SECCOMP.notif) !Self {
     const supported = try Syscall.parse(notif);
 
     if (supported) |syscall| {
@@ -35,14 +35,14 @@ pub fn from_notif(notif: linux.SECCOMP.notif) !Self {
 }
 
 /// Invoke the handler, or perform passthrough
-pub fn handle_syscall(self: Self, supervisor: *Supervisor) !Response {
+pub fn handleSyscall(self: Self, supervisor: *Supervisor) !Response {
     switch (self.backend) {
         .kernel => {
-            return Response.use_kernel(self.id);
+            return Response.useKernel(self.id);
         },
         .virtual => |syscall| {
             const syscall_res = try syscall.handle(supervisor);
-            return Response.virtual_res(self.id, syscall_res);
+            return Response.virtualRes(self.id, syscall_res);
         },
     }
 }
@@ -55,21 +55,21 @@ pub const Response = struct {
         virtual: Syscall.Result,
     },
 
-    pub fn use_kernel(id: u64) @This() {
+    pub fn useKernel(id: u64) @This() {
         return .{
             .id = id,
             .backend = .{ .kernel = {} },
         };
     }
 
-    pub fn virtual_res(id: u64, result: Syscall.Result) @This() {
+    pub fn virtualRes(id: u64, result: Syscall.Result) @This() {
         return .{
             .id = id,
             .backend = .{ .virtual = result },
         };
     }
 
-    pub fn to_notif_resp(self: @This()) linux.SECCOMP.notif_resp {
+    pub fn toNotifResp(self: @This()) linux.SECCOMP.notif_resp {
         return switch (self.backend) {
             .kernel => .{
                 .id = self.id,

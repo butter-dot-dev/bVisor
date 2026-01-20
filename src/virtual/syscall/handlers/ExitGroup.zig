@@ -15,7 +15,7 @@ pub fn parse(notif: linux.SECCOMP.notif) Self {
 pub fn handle(self: Self, supervisor: *Supervisor) !Result {
     // Clean up virtual proc entry before kernel handles the exit
     // Ignore errors - process may have already been cleaned up
-    supervisor.virtual_procs.handle_process_exit(self.kernel_pid) catch {};
+    supervisor.virtual_procs.handleProcessExit(self.kernel_pid) catch {};
 
     // Let kernel execute the actual exit_group syscall
     return .use_kernel;

@@ -5,7 +5,7 @@ const types = @import("../../../types.zig");
 const KernelFD = types.KernelFD;
 const Result = types.LinuxResult;
 
-pub inline fn lookup_child_fd(child_pid: linux.pid_t, local_fd: KernelFD) !KernelFD {
+pub inline fn lookupChildFd(child_pid: linux.pid_t, local_fd: KernelFD) !KernelFD {
     const child_fd_table: KernelFD = try Result(KernelFD).from(
         linux.pidfd_open(child_pid, 0),
     ).unwrap();
@@ -15,7 +15,7 @@ pub inline fn lookup_child_fd(child_pid: linux.pid_t, local_fd: KernelFD) !Kerne
     ).unwrap();
 }
 
-pub inline fn lookup_child_fd_with_retry(child_pid: linux.pid_t, local_fd: KernelFD, io: std.Io) !KernelFD {
+pub inline fn lookupChildFdWithRetry(child_pid: linux.pid_t, local_fd: KernelFD, io: std.Io) !KernelFD {
     const child_fd_table: KernelFD = try Result(KernelFD).from(
         linux.pidfd_open(child_pid, 0),
     ).unwrap();

@@ -40,7 +40,7 @@ pub fn unref(self: *Self) void {
 }
 
 /// Register a proc in this namespace and all ancestor namespaces.
-pub fn register_proc(self: *Self, allocator: Allocator, proc: *Proc) !void {
+pub fn registerProc(self: *Self, allocator: Allocator, proc: *Proc) !void {
     try self.procs.put(allocator, proc, {});
 
     // Register in all ancestor namespaces for visibility
@@ -52,7 +52,7 @@ pub fn register_proc(self: *Self, allocator: Allocator, proc: *Proc) !void {
 }
 
 /// Unregister a proc from this namespace and all ancestor namespaces.
-pub fn unregister_proc(self: *Self, proc: *Proc) void {
+pub fn unregisterProc(self: *Self, proc: *Proc) void {
     _ = self.procs.remove(proc);
 
     // Remove from all ancestor namespaces

@@ -23,7 +23,7 @@ pub fn handle(self: Self, supervisor: *Supervisor) !Result {
         // it's a supervisor invariant violation
         std.debug.panic("gettid: supervisor invariant violated - kernel pid {d} not in virtual_procs: {}", .{ self.kernel_pid, err });
     };
-    return Result.reply_success(@intCast(proc.pid));
+    return Result.replySuccess(@intCast(proc.pid));
 }
 
 test "gettid returns kernel pid for main thread" {
@@ -36,7 +36,7 @@ test "gettid returns kernel pid for main thread" {
     const parsed = Self.parse(notif);
 
     const res = try parsed.handle(&supervisor);
-    try testing.expect(!res.is_error());
+    try testing.expect(!res.isError());
     // For main thread, tid == pid
     try testing.expectEqual(@as(i64, kernel_pid), res.reply.val);
 }

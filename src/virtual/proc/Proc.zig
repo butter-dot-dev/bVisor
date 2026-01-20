@@ -37,7 +37,7 @@ pub fn init(allocator: Allocator, pid: KernelPID, namespace: ?*Namespace, fd_tab
         errdefer allocator.destroy(self);
 
         // register in own namespace and all ancestors
-        try ns_acquired.register_proc(allocator, self);
+        try ns_acquired.registerProc(allocator, self);
 
         return self;
     }
@@ -57,12 +57,12 @@ pub fn init(allocator: Allocator, pid: KernelPID, namespace: ?*Namespace, fd_tab
     errdefer allocator.destroy(self);
 
     // register in own namespace and all ancestors
-    try ns.register_proc(allocator, self);
+    try ns.registerProc(allocator, self);
 
     return self;
 }
 
-pub fn is_namespace_root(self: *Self) bool {
+pub fn isNamespaceRoot(self: *Self) bool {
     if (self.parent) |p| {
         return self.namespace != p.namespace; // crossed boundary
     }
@@ -71,7 +71,7 @@ pub fn is_namespace_root(self: *Self) bool {
 
 pub fn deinit(self: *Self, allocator: Allocator) void {
     // unregister from own namespace and all ancestors
-    self.namespace.unregister_proc(self);
+    self.namespace.unregisterProc(self);
 
     // release namespace reference (will free if refcount hits 0)
     self.namespace.unref();
@@ -83,7 +83,7 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
     allocator.destroy(self);
 }
 
-pub fn get_namespace_root(self: *Self) *Self {
+pub fn getNamespaceRoot(self: *Self) *Self {
     var current = self;
     while (current.parent) |p| {
         if (current.namespace != p.namespace) break;
@@ -92,7 +92,7 @@ pub fn get_namespace_root(self: *Self) *Self {
     return current;
 }
 
-pub fn init_child(self: *Self, allocator: Allocator, pid: KernelPID, namespace: ?*Namespace, fd_table: ?*FdTable) !*Self {
+pub fn initChild(self: *Self, allocator: Allocator, pid: KernelPID, namespace: ?*Namespace, fd_table: ?*FdTable) !*Self {
     const child = try Self.init(allocator, pid, namespace, fd_table, self);
     errdefer child.deinit(allocator);
 
@@ -101,25 +101,25 @@ pub fn init_child(self: *Self, allocator: Allocator, pid: KernelPID, namespace: 
     return child;
 }
 
-pub fn deinit_child(self: *Self, child: *Self, allocator: Allocator) void {
-    self.remove_child_link(child);
+pub fn deinitChild(self: *Self, child: *Self, allocator: Allocator) void {
+    self.removeChildLink(child);
     child.deinit(allocator);
 }
 
-pub fn remove_child_link(self: *Self, child: *Self) void {
+pub fn removeChildLink(self: *Self, child: *Self) void {
     _ = self.children.remove(child);
 }
 
 /// Check if this process can see the target process.
-pub fn can_see(self: *Self, target: *Self) bool {
+pub fn canSee(self: *Self, target: *Self) bool {
     return self.namespace.contains(target);
 }
 
 /// Get a sorted list of all kernel PIDs visible in this process's namespace.
 /// Does not include processes in nested child namespaces.
-pub fn get_pids_owned(self: *Self, allocator: Allocator) ![]KernelPID {
-    const root = self.get_namespace_root();
-    const procs = try root.collect_namespace_procs_owned(allocator);
+pub fn getPidsOwned(self: *Self, allocator: Allocator) ![]KernelPID {
+    const root = self.getNamespaceRoot();
+    const procs = try root.collectNamespaceProcsOwned(allocator);
     defer allocator.free(procs);
 
     var pids = try std.ArrayList(KernelPID).initCapacity(allocator, procs.len);
@@ -132,38 +132,38 @@ pub fn get_pids_owned(self: *Self, allocator: Allocator) ![]KernelPID {
 
 /// Collect all procs in the same namespace as self (stops at namespace boundaries).
 /// Returned slice must be freed by caller.
-pub fn collect_namespace_procs_owned(self: *Self, allocator: Allocator) ![]*Self {
+pub fn collectNamespaceProcsOwned(self: *Self, allocator: Allocator) ![]*Self {
     var accumulator = try ProcList.initCapacity(allocator, 16);
-    try self._collect_namespace_recursive(&accumulator, allocator, self.namespace);
+    try self._collectNamespaceRecursive(&accumulator, allocator, self.namespace);
     return accumulator.toOwnedSlice(allocator);
 }
 
-fn _collect_namespace_recursive(self: *Self, accumulator: *ProcList, allocator: Allocator, ns: *Namespace) !void {
+fn _collectNamespaceRecursive(self: *Self, accumulator: *ProcList, allocator: Allocator, ns: *Namespace) !void {
     try accumulator.append(allocator, self);
     var iter = self.children.iterator();
     while (iter.next()) |child_entry| {
         const child: *Self = child_entry.key_ptr.*;
         // stop at namespace boundary
         if (child.namespace != ns) continue;
-        try child._collect_namespace_recursive(accumulator, allocator, ns);
+        try child._collectNamespaceRecursive(accumulator, allocator, ns);
     }
 }
 
 /// Collect all descendant procs (crosses namespace boundaries).
 /// Used for process exit to kill entire subtree.
 /// Returned slice must be freed by caller.
-pub fn collect_subtree_owned(self: *Self, allocator: Allocator) ![]*Self {
+pub fn collectSubtreeOwned(self: *Self, allocator: Allocator) ![]*Self {
     var accumulator = try ProcList.initCapacity(allocator, 16);
-    try self._collect_subtree_recursive(&accumulator, allocator);
+    try self._collectSubtreeRecursive(&accumulator, allocator);
     return accumulator.toOwnedSlice(allocator);
 }
 
-fn _collect_subtree_recursive(self: *Self, accumulator: *ProcList, allocator: Allocator) !void {
+fn _collectSubtreeRecursive(self: *Self, accumulator: *ProcList, allocator: Allocator) !void {
     // Children first, then self - ensures namespace roots are deinitialized after their children
     var iter = self.children.iterator();
     while (iter.next()) |child_entry| {
         const child: *Self = child_entry.key_ptr.*;
-        try child._collect_subtree_recursive(accumulator, allocator);
+        try child._collectSubtreeRecursive(accumulator, allocator);
     }
     try accumulator.append(allocator, self);
 }

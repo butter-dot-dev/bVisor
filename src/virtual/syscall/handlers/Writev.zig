@@ -80,5 +80,5 @@ pub fn handle(self: Self, supervisor: *Supervisor) !Result {
         },
     }
 
-    return Result.reply_success(@intCast(self.data_len));
+    return Result.replySuccess(@intCast(self.data_len));
 }

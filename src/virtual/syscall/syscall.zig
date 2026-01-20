@@ -153,15 +153,15 @@ pub const Syscall = union(enum) {
             errno: i32,
         };
 
-        pub fn reply_success(val: i64) @This() {
+        pub fn replySuccess(val: i64) @This() {
             return .{ .reply = .{ .val = val, .errno = 0 } };
         }
 
-        pub fn reply_err(errno: linux.E) @This() {
+        pub fn replyErr(errno: linux.E) @This() {
             return .{ .reply = .{ .val = 0, .errno = @intFromEnum(errno) } };
         }
 
-        pub fn is_error(self: @This()) bool {
+        pub fn isError(self: @This()) bool {
             return switch (self) {
                 .use_kernel => false,
                 .reply => |reply| reply.errno != 0,
@@ -181,7 +181,7 @@ const Blocked = struct {
 
     pub fn handle(self: Self, supervisor: *Supervisor) !Syscall.Result {
         supervisor.logger.log("Blocked syscall: {d} from pid {d}", .{ self.sys_nr, self.pid });
-        return Syscall.Result.reply_err(.NOSYS);
+        return Syscall.Result.replyErr(.NOSYS);
     }
 };
 
@@ -196,6 +196,6 @@ const ToImplement = struct {
 
     pub fn handle(self: Self, supervisor: *Supervisor) !Syscall.Result {
         supervisor.logger.log("ToImplement syscall: {d} from pid {d}", .{ self.sys_nr, self.pid });
-        return Syscall.Result.reply_err(.NOSYS);
+        return Syscall.Result.replyErr(.NOSYS);
     }
 };
