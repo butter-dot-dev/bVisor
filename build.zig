@@ -19,9 +19,22 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(exe);
 
-    const run_step = b.step("run", "Run the app");
+    const run_step = b.step("run", "Run e2e smoke tests in a Linux container");
+    var docker_args = std.ArrayList([]const u8).empty;
+    defer docker_args.deinit(b.allocator);
+    docker_args.append(b.allocator, "docker") catch @panic("OOM");
+    docker_args.append(b.allocator, "run") catch @panic("OOM");
+    docker_args.append(b.allocator, "--rm") catch @panic("OOM");
+    docker_args.append(b.allocator, "-v") catch @panic("OOM");
+    docker_args.append(b.allocator, "./zig-out:/zig-out") catch @panic("OOM");
+    docker_args.append(b.allocator, "alpine") catch @panic("OOM");
+    docker_args.append(b.allocator, "/zig-out/bin/bVisor") catch @panic("OOM");
+    if (b.args) |args| {
+        docker_args.appendSlice(b.allocator, args) catch @panic("OOM");
+    }
 
-    const run_cmd = b.addRunArtifact(exe);
+    const run_cmd = b.addSystemCommand(docker_args.items);
+    run_cmd.step.dependOn(b.getInstallStep());
     run_step.dependOn(&run_cmd.step);
 
     run_cmd.step.dependOn(b.getInstallStep());
