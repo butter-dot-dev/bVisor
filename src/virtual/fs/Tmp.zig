@@ -2,116 +2,44 @@ const std = @import("std");
 const builtin = @import("builtin");
 const posix = std.posix;
 const linux = std.os.linux;
+const Io = std.Io;
+const Dir = Io.Dir;
 const types = @import("../../types.zig");
 const KernelFD = types.KernelFD;
 
 const Self = @This();
 
-/// 16-char hex string UUID (from 8 random bytes)
 uid: [16]u8,
-/// Private tmp root path: "/tmp/.bvisor/sb/<uid>/tmp"
-root: [48]u8,
-root_len: usize,
+root_dir: Dir,
+root_path: [48]u8,
+root_path_len: usize,
 
-/// Initialize private /tmp with random UUID.
-/// Creates directory structure: /tmp/.bvisor/sb/<uid>/tmp/
-pub fn init(uid: [16]u8) !Self {
-    // Build root path: /tmp/.bvisor/sb/<uid>/tmp
-    var root: [48]u8 = undefined;
-    const root_slice = std.fmt.bufPrint(&root, "/tmp/.bvisor/sb/{s}/tmp", .{uid}) catch unreachable;
-    const root_len = root_slice.len;
-
-    // Create parent directories
-    const parents = [_][]const u8{ "/tmp/.bvisor", "/tmp/.bvisor/sb" };
-    for (parents) |dir| {
-        posix.mkdirat(linux.AT.FDCWD, dir, 0o755) catch |err| switch (err) {
-            error.PathAlreadyExists => {},
-            else => return err,
-        };
-    }
-
-    // Create UUID-specific directory
-    var sb_uid_buf: [48]u8 = undefined;
-    const sb_uid_path = std.fmt.bufPrint(&sb_uid_buf, "/tmp/.bvisor/sb/{s}", .{uid}) catch unreachable;
-    posix.mkdirat(linux.AT.FDCWD, sb_uid_path, 0o755) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
-    };
-
-    // Create the tmp directory
-    posix.mkdirat(linux.AT.FDCWD, root_slice, 0o755) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
-    };
-
-    return .{ .uid = uid, .root = root, .root_len = root_len };
-}
-
-/// Cleanup private tmp directory (optional)
-pub fn deinit(self: *Self) void {
-    _ = self;
-}
-
-/// Build private path for a /tmp path.
-/// Example: "/tmp/foo.txt" -> "/tmp/.bvisor/sb/<uid>/tmp/foo.txt"
-/// Input path MUST start with "/tmp"
-pub fn privatePath(self: *const Self, tmp_path: []const u8, buf: []u8) ![:0]const u8 {
-    // Strip "/tmp" prefix to get the suffix
-    const suffix = if (std.mem.startsWith(u8, tmp_path, "/tmp"))
-        tmp_path[4..] // everything after "/tmp"
-    else
-        return error.InvalidPath;
-
-    const root = self.root[0..self.root_len];
-    const total_len = root.len + suffix.len;
-
-    if (total_len >= buf.len) return error.PathTooLong;
-
-    @memcpy(buf[0..root.len], root);
-    @memcpy(buf[root.len..][0..suffix.len], suffix);
-    buf[total_len] = 0;
-
-    return buf[0..total_len :0];
-}
-
-/// Create parent directories for a private tmp path.
-pub fn createParentDirs(self: *const Self, tmp_path: []const u8) !void {
-    var buf: [512]u8 = undefined;
-    const private_path = try self.privatePath(tmp_path, &buf);
-
-    // Find last slash to get parent directory
-    const last_slash = std.mem.lastIndexOfScalar(u8, private_path, '/') orelse return;
-    if (last_slash == 0) return;
-
-    // Create parent directories one by one
-    var i: usize = self.root_len + 1;
-    while (i < last_slash) {
-        if (buf[i] == '/') {
-            buf[i] = 0;
-            posix.mkdirat(linux.AT.FDCWD, buf[0..i :0], 0o755) catch |err| switch (err) {
-                error.PathAlreadyExists => {},
-                else => return err,
-            };
-            buf[i] = '/';
-        }
-        i += 1;
-    }
-
-    // Create the final parent directory
-    buf[last_slash] = 0;
-    posix.mkdirat(linux.AT.FDCWD, buf[0..last_slash :0], 0o755) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
+pub fn init(io: Io, uid: [16]u8) !Self {
+    var root_path: [48]u8 = undefined;
+    const root_slice = std.fmt.bufPrint(&root_path, "/tmp/.bvisor/sb/{s}/tmp", .{uid}) catch unreachable;
+    const root_dir = try Dir.cwd().createDirPathOpen(io, root_slice, .{});
+    return .{
+        .uid = uid,
+        .root_dir = root_dir,
+        .root_path = root_path,
+        .root_path_len = root_slice.len,
     };
 }
 
-/// Open a file in the private /tmp.
-/// All reads and writes are redirected here - no copy-on-write logic.
-pub fn open(self: *const Self, tmp_path: []const u8, flags: linux.O, mode: linux.mode_t) !KernelFD {
-    var buf: [512]u8 = undefined;
-    const private_path = try self.privatePath(tmp_path, &buf);
+pub fn deinit(self: *Self, io: Io) void {
+    self.root_dir.close(io);
+}
 
-    // Convert linux.O flags to posix.O flags
+/// "/tmp/foo.txt" -> "foo.txt"
+fn relPath(tmp_path: []const u8) ![]const u8 {
+    if (!std.mem.startsWith(u8, tmp_path, "/tmp")) return error.InvalidPath;
+    const after_tmp = tmp_path[4..];
+    return if (after_tmp.len > 0 and after_tmp[0] == '/') after_tmp[1..] else after_tmp;
+}
+
+pub fn open(self: *const Self, io: Io, tmp_path: []const u8, flags: linux.O, mode: linux.mode_t) !KernelFD {
+    const rel_path = try relPath(tmp_path);
+
     var posix_flags: posix.O = .{};
     posix_flags.ACCMODE = switch (flags.ACCMODE) {
         .RDONLY => .RDONLY,
@@ -126,14 +54,14 @@ pub fn open(self: *const Self, tmp_path: []const u8, flags: linux.O, mode: linux
     if (flags.CLOEXEC) posix_flags.CLOEXEC = true;
     if (flags.DIRECTORY) posix_flags.DIRECTORY = true;
 
-    // Try to open the file
-    if (posix.openat(linux.AT.FDCWD, private_path, posix_flags, @truncate(mode))) |fd| {
+    if (posix.openat(self.root_dir.handle, rel_path, posix_flags, @truncate(mode))) |fd| {
         return fd;
     } else |err| {
-        // If file not found and we're creating, make parent dirs first
         if (err == error.FileNotFound and flags.CREAT) {
-            try self.createParentDirs(tmp_path);
-            return posix.openat(linux.AT.FDCWD, private_path, posix_flags, @truncate(mode));
+            if (std.fs.path.dirnamePosix(rel_path)) |parent| {
+                try self.root_dir.createDirPath(io, parent);
+            }
+            return posix.openat(self.root_dir.handle, rel_path, posix_flags, @truncate(mode));
         }
         return err;
     }
@@ -142,49 +70,39 @@ pub fn open(self: *const Self, tmp_path: []const u8, flags: linux.O, mode: linux
 const testing = std.testing;
 
 test "Tmp.init creates directory" {
+    const io = testing.io;
     const uid = std.fmt.bytesToHex("testtest".*, .lower);
-    var tmp = try Self.init(uid);
-    defer tmp.deinit();
+    var tmp = try Self.init(io, uid);
+    defer tmp.deinit(io);
 
     // Verify root path format
-    const root = tmp.root[0..tmp.root_len];
+    const root = tmp.root_path[0..tmp.root_path_len];
     try testing.expect(std.mem.startsWith(u8, root, "/tmp/.bvisor/sb/"));
     try testing.expect(std.mem.endsWith(u8, root, "/tmp"));
 }
 
-test "Tmp.privatePath builds correct path" {
+test "Tmp.open rejects non-tmp paths" {
+    const io = testing.io;
     const uid = std.fmt.bytesToHex("testtest".*, .lower);
-    var tmp = try Self.init(uid);
-    defer tmp.deinit();
+    var tmp = try Self.init(io, uid);
+    defer tmp.deinit(io);
 
-    var buf: [512]u8 = undefined;
-    const path = try tmp.privatePath("/tmp/foo/bar.txt", &buf);
-
-    try testing.expect(std.mem.startsWith(u8, path, "/tmp/.bvisor/sb/"));
-    try testing.expect(std.mem.endsWith(u8, path, "/tmp/foo/bar.txt"));
-}
-
-test "Tmp.privatePath rejects non-tmp paths" {
-    const uid = std.fmt.bytesToHex("testtest".*, .lower);
-    var tmp = try Self.init(uid);
-    defer tmp.deinit();
-
-    var buf: [512]u8 = undefined;
-    try testing.expectError(error.InvalidPath, tmp.privatePath("/etc/passwd", &buf));
+    try testing.expectError(error.InvalidPath, tmp.open(io, "/etc/passwd", .{ .ACCMODE = .RDONLY }, 0));
 }
 
 test "Tmp.open creates and reads file" {
+    const io = testing.io;
     const uid = std.fmt.bytesToHex("testtest".*, .lower);
-    var tmp = try Self.init(uid);
-    defer tmp.deinit();
+    var tmp = try Self.init(io, uid);
+    defer tmp.deinit(io);
 
     // Open for writing
-    const wfd = try tmp.open("/tmp/test_tmp.txt", .{ .ACCMODE = .WRONLY, .CREAT = true }, 0o644);
+    const wfd = try tmp.open(io, "/tmp/test_tmp.txt", .{ .ACCMODE = .WRONLY, .CREAT = true }, 0o644);
     _ = try posix.write(wfd, "private tmp");
     posix.close(wfd);
 
     // Open for reading
-    const rfd = try tmp.open("/tmp/test_tmp.txt", .{ .ACCMODE = .RDONLY }, 0);
+    const rfd = try tmp.open(io, "/tmp/test_tmp.txt", .{ .ACCMODE = .RDONLY }, 0);
     defer posix.close(rfd);
 
     var buf: [64]u8 = undefined;

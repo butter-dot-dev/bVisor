@@ -27,7 +27,7 @@ pub fn handle(self: Self, supervisor: *Supervisor) !Result {
 test "getpid returns kernel pid" {
     const allocator = testing.allocator;
     const kernel_pid: Proc.KernelPID = 12345;
-    var supervisor = try Supervisor.init(allocator, -1, kernel_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, kernel_pid);
     defer supervisor.deinit();
 
     const notif = makeNotif(.getpid, .{ .pid = kernel_pid });
@@ -45,7 +45,7 @@ test "getpid returns kernel pid" {
 test "getpid for child process returns child kernel pid" {
     const allocator = testing.allocator;
     const init_pid: Proc.KernelPID = 100;
-    var supervisor = try Supervisor.init(allocator, -1, init_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_pid);
     defer supervisor.deinit();
 
     // Add a child process

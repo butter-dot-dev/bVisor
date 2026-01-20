@@ -94,8 +94,9 @@ pub const fs_rules: []const PathRule = &.{
     .{ .prefix = "/sys", .rule = .{ .terminal = .block } },
     .{ .prefix = "/run", .rule = .{ .terminal = .block } },
 
-    // Virtualized - private /tmp (all reads/writes redirected)
-    // Block .bvisor internal directory, allow everything else in /tmp
+    // /tmp/.bvisor contains per-sandbox data like cow and private /tmp files
+    // block access to .bvisor
+    // and redirect all others to virtual /tmp
     .{ .prefix = "/tmp", .rule = .{ .branch = .{
         .children = &.{
             .{ .prefix = ".bvisor", .rule = .{ .terminal = .block } },
@@ -103,7 +104,7 @@ pub const fs_rules: []const PathRule = &.{
         .default = .virtualize_tmp,
     } } },
 
-    // Virtualized - /proc
+    // virtualize /proc as read-only
     .{ .prefix = "/proc", .rule = .{ .terminal = .virtualize_proc } },
 };
 
@@ -272,7 +273,7 @@ fn handleVirtualizeTmp(self: Self, supervisor: *Supervisor) !Result {
     const path_slice = self.path();
 
     // Open via private tmp - all reads and writes go to sandbox-local directory
-    const tmp_fd = supervisor.tmp.open(path_slice, self.flags, self.mode) catch |err| {
+    const tmp_fd = supervisor.tmp.open(supervisor.io, path_slice, self.flags, self.mode) catch |err| {
         const errno = tmpErrorToLinuxErrno(err);
         logger.log("openat: tmp open failed: {s}", .{@tagName(errno)});
         return Result.replyErr(errno);
@@ -319,13 +320,13 @@ fn handleAllow(self: Self, supervisor: *Supervisor) !Result {
     const normalized_path = normalizePath(path_slice, &norm_buf) catch path_slice;
 
     // Check if we should use COW: either writing or COW file already exists
-    const should_use_cow = useVFS(self.flags) or supervisor.cow.exists(normalized_path);
+    const should_use_cow = useVFS(self.flags) or supervisor.cow.exists(supervisor.io, normalized_path);
 
     if (should_use_cow) {
         logger.log("openat: using COW for path: {s}", .{normalized_path});
 
         // Use COW filesystem
-        const cow_fd = supervisor.cow.open(normalized_path, self.flags, self.mode) catch |err| {
+        const cow_fd = supervisor.cow.open(supervisor.io, normalized_path, self.flags, self.mode) catch |err| {
             const errno = cowErrorToLinuxErrno(err);
             logger.log("openat: COW open failed: {s}", .{@tagName(errno)});
             return Result.replyErr(errno);
@@ -378,7 +379,7 @@ fn cowErrorToLinuxErrno(err: anytype) linux.E {
 test "openat blocks /sys and /run paths" {
     const allocator = std.testing.allocator;
     const child_pid: Proc.KernelPID = 100;
-    var supervisor = try Supervisor.init(allocator, -1, child_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, child_pid);
     defer supervisor.deinit();
 
     const blocked_paths = [_][*:0]const u8{
@@ -411,7 +412,7 @@ test "useVFS detects write modes" {
 test "openat virtualizes /proc paths" {
     const allocator = std.testing.allocator;
     const child_pid: Proc.KernelPID = 12345;
-    var supervisor = try Supervisor.init(allocator, -1, child_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, child_pid);
     defer supervisor.deinit();
 
     const notif = makeNotif(.openat, .{
@@ -430,7 +431,7 @@ test "openat virtualizes /proc paths" {
 test "openat handles allowed paths (returns NOENT for missing file)" {
     const allocator = std.testing.allocator;
     const child_pid: Proc.KernelPID = 100;
-    var supervisor = try Supervisor.init(allocator, -1, child_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, child_pid);
     defer supervisor.deinit();
 
     const notif = makeNotif(.openat, .{
@@ -450,7 +451,7 @@ test "openat handles allowed paths (returns NOENT for missing file)" {
 test "openat O_CREAT creates file, write and read back" {
     const allocator = std.testing.allocator;
     const child_pid: Proc.KernelPID = 100;
-    var supervisor = try Supervisor.init(allocator, -1, child_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, child_pid);
     defer supervisor.deinit();
 
     const test_path = "/tmp/bvisor_test_creat.txt";

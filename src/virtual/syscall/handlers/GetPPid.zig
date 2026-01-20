@@ -36,7 +36,7 @@ pub fn handle(self: Self, supervisor: *Supervisor) !Result {
 test "getppid for init process returns 0" {
     const allocator = testing.allocator;
     const kernel_pid: Proc.KernelPID = 12345;
-    var supervisor = try Supervisor.init(allocator, -1, kernel_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, kernel_pid);
     defer supervisor.deinit();
 
     const notif = makeNotif(.getppid, .{ .pid = kernel_pid });
@@ -50,7 +50,7 @@ test "getppid for init process returns 0" {
 test "getppid for child process returns parent kernel pid" {
     const allocator = testing.allocator;
     const init_pid: Proc.KernelPID = 100;
-    var supervisor = try Supervisor.init(allocator, -1, init_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_pid);
     defer supervisor.deinit();
 
     // Add a child process
@@ -71,7 +71,7 @@ test "getppid for child process returns parent kernel pid" {
 test "getppid for grandchild returns parent kernel pid" {
     const allocator = testing.allocator;
     const init_pid: Proc.KernelPID = 100;
-    var supervisor = try Supervisor.init(allocator, -1, init_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_pid);
     defer supervisor.deinit();
 
     // Create: init(100) -> child(200) -> grandchild(300)
@@ -96,7 +96,7 @@ test "getppid for grandchild returns parent kernel pid" {
 test "getppid for CLONE_NEWPID child returns 0" {
     const allocator = testing.allocator;
     const init_pid: Proc.KernelPID = 100;
-    var supervisor = try Supervisor.init(allocator, -1, init_pid);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_pid);
     defer supervisor.deinit();
 
     // Child in new namespace

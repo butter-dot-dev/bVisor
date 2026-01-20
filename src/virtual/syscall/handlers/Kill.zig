@@ -68,7 +68,7 @@ test "parse extracts target pid and signal" {
 
 test "kill with negative pid returns EINVAL" {
     const allocator = testing.allocator;
-    var supervisor = try Supervisor.init(allocator, -1, 100);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, 100);
     defer supervisor.deinit();
 
     const notif = makeNotif(.kill, .{
@@ -86,7 +86,7 @@ test "kill with negative pid returns EINVAL" {
 
 test "kill with zero pid returns EINVAL" {
     const allocator = testing.allocator;
-    var supervisor = try Supervisor.init(allocator, -1, 100);
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, 100);
     defer supervisor.deinit();
 
     const notif = makeNotif(.kill, .{
