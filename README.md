@@ -12,74 +12,104 @@ bVisor is built on [Seccomp user notifier](https://man7.org/linux/man-pages/man2
 
 Other than the overhead of syscall emulation, child processes run natively.
 
-## Status
-bVisor is not yet complete.
+### Goal
 
-### Goal:
+The goal of bVisor is to allow higher-level languages to spawn ephemeral local sandboxes, to allow local execution of bash commands.
 
-bVisor is ~complete when the following code works
-
+For example, embedded into a python SDK:
 ```python
 from bvisor import Sandbox
 
 with Sandbox() as sb:
-    # Common operations virtualized
     sb.bash("echo 'Hello, world!'")
-    sb.bash("ls /")  # serves virtual "/" 
+    sb.bash("ls /")  # serves virtual "/"
     sb.bash("touch /tmp/test.txt")
     sb.bash("curl https://www.google.com")
-    sb.bash("npm install") 
-    sb.bash("sleep 5") 
+    sb.bash("npm install")
+    sb.bash("sleep 5")
 
     try:
-        # Escape operations blocked
-        sb.bash("chroot /tmp") 
+        sb.bash("chroot /tmp")  # blocked
     except Exception as e:
-        # As espected
+        pass  # as expected
 ```
 
+Or similarly in typescript:
 ```typescript
 import { Sandbox } from "bvisor";
 
 using sb = await Sandbox.create();
 
-// Common operations virtualized
 await sb.bash("echo 'Hello, world!'");
-await sb.bash("ls /");  // serves virtual "/"
-await sb.bash("touch /tmp/test.txt");
-await sb.bash("curl https://www.google.com");
-await sb.bash("npm install");
-await sb.bash("sleep 5");
-
-try {
-    // Escape operations blocked
-    await sb.bash("chroot /tmp");
-} catch (e) {
-    // As expected
-}
+// etc ...
 ```
 
-### Milestones
-At a high level:
+## Status
 
-- [ ] Runtime on Linux host
-  - [x] Get seccomp working on a child process
-  - [x] Allow passthrough of ALL syscalls
-  - [ ] Spawn arbitrary bash command as child
-  - [ ] Virtualize stdout/stderr/stdin
-  - [ ] Virtualize other filesystem operations
-  - [ ] Virtualize network operations
-  - [ ] Block unsafe operations
-  - [ ] ... (huge list of unknowns)
+bVisor is an early proof-of-concept. Core syscall interception works via seccomp. Process isolation works via virtual namespaces. Now just working through the laundry list of misc syscalls.
 
-- [ ] Runtime on macOS host
-  - [ ] (to my knowledge, macOS does not have a seccomp user notifier equivalent)
 
-- [ ] SDK
-- 
-  - [ ] Compile runtime for distribution 
-  - [ ] Python SDK
-    - [ ] Bindings
-  - [ ] TypeScript SDK
-    - [ ] Bindings
+#### 1. Process Visibility Isolation - *in progress*
+
+Sandboxed processes can only see and signal other processes within the same namespace. Processes use real kernel PIDs, but namespace boundaries control visibility.
+
+- [x] Virtual namespaces with parent/child relationships.
+- [x] `kill` restricted to processes within namespace
+- [x] `/proc` reads filtered to visible processes only
+- [x] `clone`/`fork` inherit namespaces, mimicking real kernel behavior
+- [x] Per-process virtual FD tables
+- [ ] `wait4`/`waitid` for process reaping
+- [ ] `execve` for program execution
+
+#### 2. Copy-on-Write Filesystem - *in progress*
+
+bVisor is imageless, meaning it does not require a base image to run. It runs with direct visibility to the host filesystem. This allows system dependencies such as `npm` to work out of the box.
+
+Isolation is achieved via a copy-on-write overlay on top of the host filesystem. Files opened with write flags are copied to a sandbox-local directory. Read-only files are passed through to the real filesystem. 
+
+- [x] Path normalization (blocks `..` traversal attacks)
+- [x] `openat` with path-based allow/block rules
+- [ ] COW (copy-on-write) layer for write operations
+- [ ] Storage backend for COW (plans for /tmp, local, s3)
+- [ ] FD operations (`read`, `write`, `close`, `dup`, `lseek`, `fstat`, `fcntl`)
+- [ ] Directory operations (`getcwd`, `chdir`, `mkdirat`, `unlinkat`, `getdents64`)
+
+#### 3. Network Isolation - *not started*
+
+- [ ] Block or virtualize network syscalls
+- [ ] Optional allowlist for specific hosts/ports
+
+#### 4. Resource Limits (cgroups) - *not started*
+
+- [ ] CPU/memory limits
+- [ ] I/O throttling
+
+### Infrastructure
+
+**Core**
+- [x] Seccomp user notifier interception
+- [x] Supervisor/child process model
+- [x] BPF filter installation
+- [x] Cross-process memory access (`process_vm_readv`/`writev`)
+- [x] `writev` emulation (stdout/stderr capture)
+
+**Blocked Dangerous Syscalls**
+- [x] `ptrace`, `mount`, `umount2`, `chroot`, `pivot_root`, `setns`, `unshare`, `seccomp`, `reboot`
+
+**Passthrough** (kernel handles directly)
+- [x] Memory: `brk`, `mmap`, `mprotect`, `munmap`
+- [x] Time: `clock_gettime`, `gettimeofday`, `nanosleep`
+- [x] Identity: `getuid`, `geteuid`, `getgid`, `getegid`
+- [x] Runtime: `getrandom`, `uname`, `futex`, `prlimit64`
+
+### Platform Support
+
+- [x] Linux (aarch64, x86_64)
+- [ ] macOS - requires alternative to seccomp (no equivalent exists)
+
+### SDK
+
+- [ ] Compile runtime for distribution
+- [ ] Python bindings
+- [ ] TypeScript bindings
 
