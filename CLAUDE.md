@@ -95,8 +95,9 @@ src/
 
 **Adding a new emulated syscall:**
 When implementing a new emulated syscall,
-1. Create `src/virtual/syscall/handlers/{NewSyscall}.zig` with `parse()` and `handle()` methods
+1. Create `src/virtual/syscall/handlers/{newsyscall}.zig` (lowercase) with `handle()` method
 2. Update the corresponding case in the switch in `src/virtual/syscall/syscalls.zig`
+3. Add test import in `src/main.zig` test block: `_ = @import("virtual/syscall/handlers/{newsyscall}.zig");`
 
 ## Testing
 
@@ -111,21 +112,21 @@ else
 **Test discovery**: Zig only runs tests from files transitively imported by the test root. Tests in standalone files must be explicitly imported in `src/main.zig`:
 ```zig
 test {
-     _ = @import("Supervisor.zig");
+    _ = @import("Supervisor.zig");
     _ = @import("virtual/proc/Procs.zig");
     _ = @import("virtual/fs/OpenFile.zig");
     _ = @import("virtual/fs/FdTable.zig");
     _ = @import("virtual/fs/Cow.zig");
     _ = @import("virtual/fs/Tmp.zig");
     _ = @import("virtual/syscall/handlers/exit_group.zig");
-    _ = @import("virtual/syscall/handlers/GetPid.zig");
-    _ = @import("virtual/syscall/handlers/GetPPid.zig");
-    _ = @import("virtual/syscall/handlers/Kill.zig");
-    _ = @import("virtual/syscall/handlers/OpenAt.zig");
-    _ = @import("virtual/syscall/handlers/Read.zig");
-    _ = @import("virtual/syscall/handlers/Readv.zig");
-    _ = @import("virtual/syscall/handlers/Write.zig");
-    _ = @import("virtual/syscall/handlers/Writev.zig");
+    _ = @import("virtual/syscall/handlers/getpid.zig");
+    _ = @import("virtual/syscall/handlers/getppid.zig");
+    _ = @import("virtual/syscall/handlers/kill.zig");
+    _ = @import("virtual/syscall/handlers/openat.zig");
+    _ = @import("virtual/syscall/handlers/read.zig");
+    _ = @import("virtual/syscall/handlers/readv.zig");
+    _ = @import("virtual/syscall/handlers/write.zig");
+    _ = @import("virtual/syscall/handlers/writev.zig");
 }
 ```
 
