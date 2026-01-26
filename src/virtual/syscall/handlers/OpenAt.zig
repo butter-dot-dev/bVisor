@@ -523,10 +523,10 @@ test "resolve /proc/self triggers virtualize" {
 }
 
 test "path traversal /proc/../etc/passwd does not virtualize" {
-    try testing.expect(try resolve("/proc/../etc/passwd") == .block);
+    try testing.expect(try resolve("/proc/../etc/passwd") == default_action);
 }
 
-test "resolve /tmp triggers virtualize_tmp" {
+test "resolve /tmp triggers (besides /.bvisor) virtualize_tmp" {
     try testing.expect(try resolve("/tmp") == .virtualize_tmp);
     try testing.expect(try resolve("/tmp/foo.txt") == .virtualize_tmp);
     try testing.expect(try resolve("/tmp/subdir/file") == .virtualize_tmp);

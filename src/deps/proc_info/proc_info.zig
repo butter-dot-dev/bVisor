@@ -5,10 +5,13 @@ const impl = if (builtin.is_test)
 else
     @import("impl/linux.zig");
 
-pub const SupervisorPID = @import("../../virtual/proc/Proc.zig").SupervisorPID;
+const Proc = @import("../../virtual/proc/Proc.zig");
+pub const SupervisorPID = Proc.SupervisorPID;
+pub const GuestPID = Proc.GuestPID;
 pub const CloneFlags = @import("../../virtual/proc/Procs.zig").CloneFlags;
 
 pub const readPpid = impl.readPpid;
 pub const detectCloneFlags = impl.detectCloneFlags;
+pub const readNsPids = impl.readNsPids;
 
 pub const testing = if (builtin.is_test) impl else struct {};

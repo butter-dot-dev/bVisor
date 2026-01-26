@@ -3,6 +3,7 @@ const linux = std.os.linux;
 const Supervisor = @import("../../../Supervisor.zig");
 const Proc = @import("../../proc/Proc.zig");
 const Procs = @import("../../proc/Procs.zig");
+const proc_info = @import("../../../deps/deps.zig").proc_info;
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
@@ -40,13 +41,13 @@ test "getppid for init process returns 0" {
     try testing.expectEqual(@as(i64, 0), resp.val);
 }
 
-test "getppid for child process returns parent kernel pid" {
+test "getppid for immediate child process returns parent supervisor pid" {
     const allocator = testing.allocator;
     const init_pid: Proc.SupervisorPID = 100;
     var supervisor = try Supervisor.init(allocator, testing.io, -1, init_pid);
     defer supervisor.deinit();
 
-    // Add a child process
+    // Add a guest process
     const guest_pid: Proc.SupervisorPID = 200;
     const parent = supervisor.guest_procs.lookup.get(init_pid).?;
     _ = try supervisor.guest_procs.registerChild(parent, guest_pid, Procs.CloneFlags.from(0));
@@ -55,11 +56,11 @@ test "getppid for child process returns parent kernel pid" {
     const notif = makeNotif(.getppid, .{ .pid = guest_pid });
     const resp = handle(notif, &supervisor);
     try testing.expect(!isError(resp));
-    // Parent kernel PID
+    // Parent supervisor PID
     try testing.expectEqual(@as(i64, init_pid), resp.val);
 }
 
-test "getppid for grandchild returns parent kernel pid" {
+test "getppid for grandchild returns parent supervisor pid" {
     const allocator = testing.allocator;
     const init_pid: Proc.SupervisorPID = 100;
     var supervisor = try Supervisor.init(allocator, testing.io, -1, init_pid);
@@ -79,22 +80,26 @@ test "getppid for grandchild returns parent kernel pid" {
     const resp = handle(notif, &supervisor);
 
     try testing.expect(!isError(resp));
-    // Parent (child) kernel PID
+    // Child (grandchild's parent) supervisor PID
     try testing.expectEqual(@as(i64, guest_pid), resp.val);
 }
 
-test "getppid for CLONE_NEWPID child returns 0" {
+test "getppid for CLONE_NEWPID immediate child returns 0" {
     const allocator = testing.allocator;
     const init_pid: Proc.SupervisorPID = 100;
     var supervisor = try Supervisor.init(allocator, testing.io, -1, init_pid);
     defer supervisor.deinit();
+    defer proc_info.testing.reset(allocator);
 
-    // Child in new namespace
+    // Child in new namespace (depth 2, PID 1 in its own namespace)
     const guest_pid: Proc.SupervisorPID = 200;
+    const nspids = [_]Proc.GuestPID{ 200, 1 };
+    try proc_info.testing.setupNsPids(allocator, guest_pid, &nspids);
+
     const parent = supervisor.guest_procs.lookup.get(init_pid).?;
     _ = try supervisor.guest_procs.registerChild(parent, guest_pid, Procs.CloneFlags.from(linux.CLONE.NEWPID));
 
-    // Child calls getppid - parent is not visible in child's namespace
+    // Child calls getppid - parent is not visible from within child's namespace
     const notif = makeNotif(.getppid, .{ .pid = guest_pid });
     const resp = handle(notif, &supervisor);
     try testing.expect(!isError(resp));

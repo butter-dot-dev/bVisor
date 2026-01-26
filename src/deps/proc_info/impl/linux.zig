@@ -5,7 +5,9 @@ const types = @import("../../../types.zig");
 const LinuxResult = types.LinuxResult;
 const SupervisorFD = types.SupervisorFD;
 
-pub const SupervisorPID = @import("../../../virtual/proc/Proc.zig").SupervisorPID;
+const Proc = @import("../../../virtual/proc/Proc.zig");
+pub const SupervisorPID = Proc.SupervisorPID;
+pub const GuestPID = Proc.GuestPID;
 pub const CloneFlags = @import("../../../virtual/proc/Procs.zig").CloneFlags;
 
 // kcmp types from linux/kcmp.h
@@ -35,6 +37,43 @@ pub fn readPpid(pid: SupervisorPID) !SupervisorPID {
         }
     }
     return error.ProcNotInKernel;
+}
+
+/// Read NSpid (namespace PID chain) from /proc/[pid]/status.
+/// Returns a slice of PIDs from outermost (root) to innermost (process's own namespace).
+/// Example: NSpid: 15234  892  7  1 -> [15234, 892, 7, 1]
+/// The last element is the PID in the process's own namespace.
+pub fn readNsPids(pid: SupervisorPID, buf: []GuestPID) ![]GuestPID {
+    var path_buf: [32:0]u8 = undefined;
+    const path = std.fmt.bufPrintZ(&path_buf, "/proc/{d}/status", .{pid}) catch unreachable;
+
+    const fd = try LinuxResult(SupervisorFD).from(
+        linux.open(path.ptr, .{ .ACCMODE = .RDONLY }, 0),
+    ).unwrap();
+    defer _ = linux.close(fd);
+
+    var file_buf: [4096]u8 = undefined;
+    const n = try LinuxResult(usize).from(
+        linux.read(fd, &file_buf, file_buf.len),
+    ).unwrap();
+
+    // Parse "NSpid:\t<pid>[\t<pid>...]" line
+    var lines = std.mem.splitScalar(u8, file_buf[0..n], '\n');
+    while (lines.next()) |line| {
+        if (std.mem.startsWith(u8, line, "NSpid:")) {
+            const pids_str = std.mem.trim(u8, line[6..], " \t");
+            var count: usize = 0;
+            var iter = std.mem.tokenizeAny(u8, pids_str, " \t");
+            while (iter.next()) |pid_str| {
+                if (count >= buf.len) return error.BufferTooSmall;
+                buf[count] = std.fmt.parseInt(GuestPID, pid_str, 10) catch return error.ParseError;
+                count += 1;
+            }
+            if (count == 0) return error.NSpidNotFound;
+            return buf[0..count];
+        }
+    }
+    return error.NSpidNotFound;
 }
 
 /// Detect clone flags by querying kernel state
