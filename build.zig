@@ -46,7 +46,7 @@ pub fn build(b: *std.Build) void {
 
     // 'run' mounts built linux exe into a linux container and runs it there
     const run_cli_step = b.step("run", "Run executable in a Linux container");
-    const run_args = [_][]const u8{ "docker", "run", "--rm", "-v", "./zig-out:/zig-out", "alpine", "/zig-out/bin/bVisor" };
+    const run_args = [_][]const u8{ "docker", "run", "--rm", "--cap-add=SYS_PTRACE", "-v", "./zig-out:/zig-out", "alpine", "/zig-out/bin/bVisor" };
     const run_cmd = b.addSystemCommand(&run_args);
     run_cmd.step.dependOn(b.getInstallStep()); // docker run depends on linux exe being built
     run_cli_step.dependOn(&run_cmd.step);

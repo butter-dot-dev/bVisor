@@ -15,7 +15,8 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     const target_pid: Proc.GuestPID = @intCast(@as(i64, @bitCast(notif.data.arg0)));
     const signal: u6 = @truncate(notif.data.arg1);
 
-    // Negative PIDs (process groups) not supported
+    // Non-positive PIDs (process groups) not supported
+    // TODO: support all integer target PIDS
     if (target_pid <= 0) {
         return replyErr(notif.id, .INVAL);
     }
@@ -23,9 +24,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     const caller = supervisor.guest_procs.get(caller_pid) catch
         return replyErr(notif.id, .SRCH);
 
-    // TODO ERIK get target via namespace reference frame of the caller, not from guest_procs
-
-    const target = supervisor.guest_procs.get(target_pid) catch
+    const target = caller.namespace.procs.get(target_pid) orelse
         return replyErr(notif.id, .SRCH);
 
     // Caller must be able to see target

@@ -2,8 +2,11 @@ const std = @import("std");
 const linux = std.os.linux;
 const Allocator = std.mem.Allocator;
 const Proc = @import("Proc.zig");
+const GuestPID = Proc.GuestPID;
+const SupervisorPID = Proc.SupervisorPID;
+const proc_info = @import("../../deps/proc_info/proc_info.zig");
 
-const ProcSet = std.AutoHashMapUnmanaged(*Proc, void);
+const ProcMap = std.AutoHashMapUnmanaged(GuestPID, *Proc);
 
 const Self = @This();
 
@@ -13,13 +16,15 @@ const Self = @This();
 ref_count: usize,
 allocator: Allocator,
 parent: ?*Self,
-procs: ProcSet = .empty,
+// TODO: change "ProcSet" to "ProcMap" : AutoHashMapUnmanaged(guestPID, *Proc) bi-directional?
+procs: ProcMap = .empty,
 
 pub fn init(allocator: Allocator, parent: ?*Self) !*Self {
     const self = try allocator.create(Self);
     self.* = .{
         .ref_count = 1,
         .allocator = allocator,
+        // TODO: check consistency of calling p.ref() here versus elsewhere
         .parent = if (parent) |p| p.ref() else null,
     };
     return self;
@@ -40,32 +45,73 @@ pub fn unref(self: *Self) void {
 }
 
 /// Register a proc in this namespace and all ancestor namespaces.
-pub fn registerProc(self: *Self, allocator: Allocator, proc: *Proc) !void {
-    try self.procs.put(allocator, proc, {});
+/// Reads NSpid from /proc/[pid]/status to get the guest PID for each namespace level.
+/// NSpid format: "NSpid: 15234  892  7  1" (outermost to innermost)
+pub fn registerProc(self: *Self, allocator: Allocator, proc: *Proc, supervisor_pid: SupervisorPID) !void {
+    // Read NSpid chain from kernel. Gives us PIDs from outermost to innermost namespace
+    var nspid_buf: [128]GuestPID = undefined;
+    const nspids = try proc_info.readNsPids(supervisor_pid, &nspid_buf);
 
-    // Register in all ancestor namespaces for visibility
-    var ancestor = self.parent;
-    while (ancestor) |ns| {
-        try ns.procs.put(allocator, proc, {});
-        ancestor = ns.parent;
+    // Count namespace depth (self + ancestors)
+    var ns_depth: usize = 1;
+    var ns = self.parent;
+    while (ns) |p| : (ns = p.parent) {
+        ns_depth += 1;
+    }
+
+    // NSpid length should match namespace depth
+    if (nspids.len != ns_depth) {
+        return error.NamespaceDepthMismatch;
+    }
+
+    // Register in own namespace
+    try self.procs.put(allocator, nspids[nspids.len - 1], proc);
+
+    // Register in all ancestor namespaces (walking backwards through nspids)
+    // Only enter loop if there are ancestors (nspids.len > 1)
+    if (nspids.len > 1) {
+        var ancestor = self.parent;
+        var idx: usize = nspids.len - 2; // Start from second-to-last
+        while (ancestor) |anc_ns| {
+            try anc_ns.procs.put(allocator, nspids[idx], proc);
+            ancestor = anc_ns.parent;
+            if (idx == 0) break;
+            idx -= 1;
+        }
     }
 }
 
 /// Unregister a proc from this namespace and all ancestor namespaces.
 pub fn unregisterProc(self: *Self, proc: *Proc) void {
-    _ = self.procs.remove(proc);
+    // Find and remove from own namespace
+    if (self.getGuestPID(proc)) |guest_pid| {
+        _ = self.procs.remove(guest_pid);
+    }
 
     // Remove from all ancestor namespaces
     var ancestor = self.parent;
     while (ancestor) |ns| {
-        _ = ns.procs.remove(proc);
+        if (ns.getGuestPID(proc)) |guest_pid| {
+            _ = ns.procs.remove(guest_pid);
+        }
         ancestor = ns.parent;
     }
 }
 
 /// Check if a proc is visible in this namespace.
 pub fn contains(self: *Self, proc: *Proc) bool {
-    return self.procs.contains(proc);
+    return self.getGuestPID(proc) != null;
+}
+
+/// Reverse lookup in ProcMap for guest PID of a Proc
+pub fn getGuestPID(self: *Self, proc: *Proc) ?GuestPID {
+    var iterator = self.procs.iterator();
+    while (iterator.next()) |entry| {
+        const key = entry.key_ptr;
+        const val = entry.value_ptr;
+        if (val.* == proc) return key.*;
+    }
+    return null;
 }
 
 const testing = std.testing;

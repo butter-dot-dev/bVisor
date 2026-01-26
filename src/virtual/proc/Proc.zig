@@ -31,9 +31,7 @@ pub fn init(allocator: Allocator, pid: SupervisorPID, namespace: ?*Namespace, fd
         const self = try allocator.create(Self);
         errdefer allocator.destroy(self);
 
-        // register in own namespace and all ancestors
-        try ns_acquired.registerProc(allocator, self);
-
+        // Initialize struct first
         self.* = .{
             .pid = pid,
             .namespace = ns_acquired,
@@ -41,10 +39,14 @@ pub fn init(allocator: Allocator, pid: SupervisorPID, namespace: ?*Namespace, fd
             .parent = parent,
         };
 
+        // Register in own namespace and all ancestors
+        try ns_acquired.registerProc(allocator, self, pid);
+        errdefer ns_acquired.unregisterProc(self);
+
         return self;
     }
 
-    // create this proc as root in a new namespace
+    // Create this proc as root in a new namespace
     const parent_ns = if (parent) |p| p.namespace else null;
     const ns = try Namespace.init(allocator, parent_ns);
     errdefer ns.unref();
@@ -52,15 +54,17 @@ pub fn init(allocator: Allocator, pid: SupervisorPID, namespace: ?*Namespace, fd
     const self = try allocator.create(Self);
     errdefer allocator.destroy(self);
 
-    // register in own namespace and all ancestors
-    try ns.registerProc(allocator, self);
-
+    // Initialize struct first
     self.* = .{
         .pid = pid,
         .namespace = ns,
         .fd_table = fdt,
         .parent = parent,
     };
+
+    // Register in own namespace and all ancestors
+    try ns.registerProc(allocator, self, pid);
+    errdefer ns.unregisterProc(self);
 
     return self;
 }
