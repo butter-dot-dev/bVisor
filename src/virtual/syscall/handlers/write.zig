@@ -10,84 +10,50 @@ const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
 const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 const isError = @import("../../../seccomp/notif.zig").isError;
+const replyContinue = @import("../../../seccomp/notif.zig").replyContinue;
 
 // comptime dependency injection
 const deps = @import("../../../deps/deps.zig");
 const memory_bridge = deps.memory_bridge;
 
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
-    const supervisor_pid: Proc.SupervisorPID = @intCast(notif.pid);
-    const fd: i32 = @bitCast(@as(u32, @truncate(notif.data.arg0)));
-    const buf_ptr: u64 = notif.data.arg1;
-    const count: usize = @truncate(notif.data.arg2);
     const logger = supervisor.logger;
 
-    // Handle stdout/stderr - write to real stdout/stderr
-    switch (fd) {
-        linux.STDOUT_FILENO => {
-            var buf: [4096]u8 = undefined;
-            const read_count = @min(count, buf.len);
-            memory_bridge.readSlice(buf[0..read_count], supervisor_pid, buf_ptr) catch {
-                return replyErr(notif.id, .FAULT);
-            };
-            var stdout_buffer: [1024]u8 = undefined;
-            var stdout_writer = std.Io.File.stdout().writer(supervisor.io, &stdout_buffer);
-            const stdout = &stdout_writer.interface;
-            stdout.writeAll(buf[0..read_count]) catch {
-                logger.log("write: error writing to stdout", .{});
-                return replyErr(notif.id, .IO);
-            };
-            stdout.flush() catch {
-                logger.log("write: error flushing stdout", .{});
-                return replyErr(notif.id, .IO);
-            };
-            return replySuccess(notif.id, @intCast(read_count));
-        },
-        linux.STDERR_FILENO => {
-            var buf: [4096]u8 = undefined;
-            const read_count = @min(count, buf.len);
-            memory_bridge.readSlice(buf[0..read_count], supervisor_pid, buf_ptr) catch {
-                return replyErr(notif.id, .FAULT);
-            };
-            var stderr_buffer: [1024]u8 = undefined;
-            var stderr_writer = std.Io.File.stderr().writer(supervisor.io, &stderr_buffer);
-            const stderr = &stderr_writer.interface;
-            stderr.writeAll(buf[0..read_count]) catch {
-                logger.log("write: error writing to stderr", .{});
-                return replyErr(notif.id, .IO);
-            };
-            stderr.flush() catch {
-                logger.log("write: error flushing stderr", .{});
-                return replyErr(notif.id, .IO);
-            };
-            return replySuccess(notif.id, @intCast(read_count));
-        },
-        else => {},
+    const pid: Proc.SupervisorPID = @intCast(notif.pid);
+    const fd: i32 = @bitCast(@as(u32, @truncate(notif.data.arg0)));
+    const buf_addr: u64 = notif.data.arg1;
+    const count: usize = @truncate(notif.data.arg2);
+
+    // Continue in case of stdout or stderr
+    // In the future we'll virtualize this ourselves for more control of where logs go
+    if (fd == linux.STDOUT_FILENO or fd == linux.STDERR_FILENO) {
+        return replyContinue(notif.id);
     }
 
+    // From here, fd is a virtualFD returned by openat
     // Look up the calling process
-    const proc = supervisor.guest_procs.get(supervisor_pid) catch {
-        logger.log("write: process not found for pid={d}", .{supervisor_pid});
+    const proc = supervisor.guest_procs.lookup.get(pid) orelse {
+        logger.log("write: process not found for pid={d}", .{pid});
         return replyErr(notif.id, .SRCH);
     };
 
-    // Look up the virtual FD
-    const fd_ptr = proc.fd_table.get(fd) orelse {
+    // Look up the file object
+    const file = proc.fd_table.get(fd) orelse {
         logger.log("write: EBADF for fd={d}", .{fd});
         return replyErr(notif.id, .BADF);
     };
 
-    // Write up to min(count, 4096) - short writes are valid POSIX behavior
-    var buf: [4096]u8 = undefined;
-    const write_size = @min(count, buf.len);
-    memory_bridge.readSlice(buf[0..write_size], supervisor_pid, buf_ptr) catch {
+    // Copy guest process buf to local
+    const max_len = 4096;
+    const max_buf: [max_len]u8 = undefined;
+    const max_count = @min(count, max_len);
+    const buf: []u8 = max_buf[0..max_count];
+    memory_bridge.readSlice(buf, @intCast(pid), buf_addr) catch {
         return replyErr(notif.id, .FAULT);
     };
 
-    const n = fd_ptr.write(buf[0..write_size]) catch |err| {
-        logger.log("write: error writing to fd: {s}", .{@errorName(err)});
-        return replyErr(notif.id, .IO);
-    };
+    // Write local buf to file
+    const n = try file.write(buf);
 
     logger.log("write: wrote {d} bytes", .{n});
     return replySuccess(notif.id, @intCast(n));

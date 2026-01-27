@@ -1,7 +1,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const types = @import("../../types.zig");
-const OpenFile = @import("OpenFile.zig").OpenFile;
+const File = @import("file.zig").File;
+const posix = std.posix;
 
 const SupervisorFD = types.SupervisorFD;
 
@@ -16,7 +17,7 @@ const Self = @This();
 /// When CLONE_FILES is not set, child gets a clone (copy with fresh refcount).
 ref_count: usize,
 allocator: Allocator,
-open_files: std.AutoHashMapUnmanaged(VirtualFD, OpenFile),
+open_files: std.AutoHashMapUnmanaged(VirtualFD, File),
 next_vfd: VirtualFD = 3, // start after stdin/stdout/stderr
 
 pub fn init(allocator: Allocator) !*Self {
@@ -44,41 +45,37 @@ pub fn unref(self: *Self) void {
 
 /// Create an independent copy with refcount=1.
 /// Used when CLONE_FILES is not set.
-pub fn clone(self: *Self) !*Self {
-    const new = try self.allocator.create(Self);
+pub fn clone(self: *Self, allocator: Allocator) !*Self {
+    const new = try allocator.create(Self);
     errdefer self.allocator.destroy(new);
 
     // AutoHashMapUnmanaged has no clone(), so we iterate manually
-    var new_open_files: std.AutoHashMapUnmanaged(VirtualFD, OpenFile) = .empty;
+    var new_open_files: std.AutoHashMapUnmanaged(VirtualFD, File) = .empty;
     errdefer new_open_files.deinit(self.allocator);
 
     var iter = self.open_files.iterator();
     while (iter.next()) |entry| {
+        // performs value copy
         try new_open_files.put(self.allocator, entry.key_ptr.*, entry.value_ptr.*);
     }
 
     new.* = .{
         .ref_count = 1,
-        .allocator = self.allocator,
+        .allocator = allocator,
         .open_files = new_open_files,
         .next_vfd = self.next_vfd,
     };
     return new;
 }
 
-pub fn insert(self: *Self, vfd: VirtualFD, file: OpenFile) !void {
-    try self.open_files.put(self.allocator, vfd, file);
-}
-
-/// Allocate a new virtual fd number, insert the file, and return the vfd
-pub fn open(self: *Self, file: OpenFile) !VirtualFD {
+pub fn insert(self: *Self, file: File) !VirtualFD {
     const vfd = self.next_vfd;
     self.next_vfd += 1;
     try self.open_files.put(self.allocator, vfd, file);
     return vfd;
 }
 
-pub fn get(self: *Self, vfd: VirtualFD) ?*OpenFile {
+pub fn get(self: *Self, vfd: VirtualFD) ?*File {
     return self.open_files.getPtr(vfd);
 }
 
