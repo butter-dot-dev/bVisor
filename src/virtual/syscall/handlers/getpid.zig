@@ -13,13 +13,16 @@ const isError = @import("../../../seccomp/notif.zig").isError;
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
     const caller_pid: Proc.SupervisorPID = @intCast(notif.pid);
 
-    const proc = supervisor.guest_procs.get(caller_pid) catch |err| {
+    // Sync supervisor's procs with the kernel
+    supervisor.guest_procs.syncNewProcs() catch {};
+
+    const caller_proc = supervisor.guest_procs.get(caller_pid) catch |err| {
         // getpid() never fails in the kernel - if we can't find the process,
         // it's a supervisor invariant violation
         std.debug.panic("getpid: supervisor invariant violated - supervisor pid {d} not in guest_procs: {}", .{ caller_pid, err });
     };
 
-    const guest_pid = proc.namespace.getGuestPID(proc) orelse std.debug.panic("getpid: supervisor invariant violated - proc's namespace doesn't contain itself", .{});
+    const guest_pid = caller_proc.namespace.getGuestPID(caller_proc) orelse std.debug.panic("getpid: supervisor invariant violated - proc's namespace doesn't contain itself", .{});
 
     return replySuccess(notif.id, @intCast(guest_pid));
 }

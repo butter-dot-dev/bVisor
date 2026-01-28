@@ -21,21 +21,24 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         return replyErr(notif.id, .INVAL);
     }
 
-    const caller = supervisor.guest_procs.get(caller_pid) catch
-        return replyErr(notif.id, .SRCH);
+    // Sync supervisor's procs with the kernel
+    supervisor.guest_procs.syncNewProcs() catch {};
 
-    const target = caller.namespace.procs.get(target_pid) orelse
+    // Get references to the caller and target processes
+    const caller_proc = supervisor.guest_procs.get(caller_pid) catch
+        return replyErr(notif.id, .SRCH);
+    const target_proc = caller_proc.namespace.procs.get(target_pid) orelse
         return replyErr(notif.id, .SRCH);
 
     // Caller must be able to see target
     // TODO: rethink, this lookup is all messed up and ignores GuestPIDs being an option
-    if (!caller.canSee(target)) {
+    if (!caller_proc.canSee(target_proc)) {
         return replyErr(notif.id, .SRCH);
     }
 
     // Execute real kill syscall
     const sig: posix.SIG = @enumFromInt(signal);
-    posix.kill(@intCast(target.pid), sig) catch |err| {
+    posix.kill(@intCast(target_proc.pid), sig) catch |err| {
         const errno: linux.E = switch (err) {
             error.PermissionDenied => .PERM,
             error.ProcessNotFound => .SRCH,

@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 const Proc = @import("../../../virtual/proc/Proc.zig");
 pub const SupervisorPID = Proc.SupervisorPID;
 pub const GuestPID = Proc.GuestPID;
+pub const ProcStatus = @import("../../..//virtual/proc/ProcStatus.zig").ProcStatus;
 pub const CloneFlags = @import("../../../virtual/proc/Procs.zig").CloneFlags;
 
 /// Max depth of namespace hierarchy for mock NsPids
@@ -17,11 +18,6 @@ pub var mock_clone_flags: std.AutoHashMapUnmanaged(SupervisorPID, CloneFlags) = 
 
 /// Mock NSpid map: supervisor_pid -> array of guest PIDs (outermost to innermost)
 pub var mock_nspids: std.AutoHashMapUnmanaged(SupervisorPID, []const GuestPID) = .empty;
-
-/// Read parent PID from mock map
-pub fn readPpid(pid: SupervisorPID) !SupervisorPID {
-    return mock_ppid_map.get(pid) orelse error.ProcNotInKernel;
-}
 
 /// Return mock clone flags for a child
 pub fn detectCloneFlags(parent_pid: SupervisorPID, child_pid: SupervisorPID) CloneFlags {
@@ -42,6 +38,19 @@ pub fn readNsPids(pid: SupervisorPID, buf: []GuestPID) ![]GuestPID {
     if (buf.len < 1) return error.BufferTooSmall;
     buf[0] = pid;
     return buf[0..1];
+}
+
+pub fn getStatus(pid: SupervisorPID) !ProcStatus {
+
+    // Read parent PID from mock map
+    const ppid = mock_ppid_map.get(pid) orelse return error.ProcNotInKernel;
+
+    var status = ProcStatus{ .pid = pid, .ppid = ppid };
+    const nspids = mock_nspids.get(pid) orelse &[_]GuestPID{pid};
+    @memcpy(status.nspids_buf[0..nspids.len], nspids);
+    status.nspids_len = nspids.len;
+
+    return status;
 }
 
 /// Reset mock state - call in test cleanup
@@ -68,4 +77,17 @@ pub fn setupCloneFlags(allocator: Allocator, child: SupervisorPID, flags: CloneF
 /// nspids should be ordered from outermost (root) to innermost (process's own namespace).
 pub fn setupNsPids(allocator: Allocator, pid: SupervisorPID, nspids: []const GuestPID) !void {
     try mock_nspids.put(allocator, pid, nspids);
+}
+
+/// List all PIDs from mock - returns keys from mock_ppid_map
+pub fn listPids(allocator: Allocator) ![]SupervisorPID {
+    var pids: std.ArrayListUnmanaged(SupervisorPID) = .empty;
+    errdefer pids.deinit(allocator);
+
+    var iter = mock_ppid_map.keyIterator();
+    while (iter.next()) |pid_ptr| {
+        try pids.append(allocator, pid_ptr.*);
+    }
+
+    return pids.toOwnedSlice(allocator);
 }

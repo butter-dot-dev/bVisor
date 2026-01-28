@@ -12,7 +12,10 @@ const isError = @import("../../../seccomp/notif.zig").isError;
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
     const caller_pid: Proc.SupervisorPID = @intCast(notif.pid);
 
-    const proc = supervisor.guest_procs.get(caller_pid) catch |err| {
+    // Sync supervisor's procs with the kernel
+    supervisor.guest_procs.syncNewProcs() catch {};
+
+    const caller_proc = supervisor.guest_procs.get(caller_pid) catch |err| {
         // getppid() never fails in the kernel - if we can't find the process,
         // it's a supervisor invariant violation
         std.debug.panic("getppid: supervisor invariant violated - kernel pid {d} not in guest_procs: {}", .{ caller_pid, err });
@@ -21,8 +24,8 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     // Return parent's kernel PID, or 0 if:
     // - No parent (sandbox root)
     // - Parent not visible (e.g., in CLONE_NEWPID case where parent is in different namespace)
-    const ppid: Proc.SupervisorPID = if (proc.parent) |p|
-        if (proc.canSee(p)) p.pid else 0
+    const ppid: Proc.SupervisorPID = if (caller_proc.parent) |p|
+        if (caller_proc.canSee(p)) p.pid else 0
     else
         0;
 

@@ -16,7 +16,6 @@ const Self = @This();
 ref_count: usize,
 allocator: Allocator,
 parent: ?*Self,
-// TODO: change "ProcSet" to "ProcMap" : AutoHashMapUnmanaged(guestPID, *Proc) bi-directional?
 procs: ProcMap = .empty,
 
 pub fn init(allocator: Allocator, parent: ?*Self) !*Self {
