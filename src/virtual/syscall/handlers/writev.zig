@@ -19,8 +19,11 @@ const MAX_IOV = 16;
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
     const logger = supervisor.logger;
 
+    // Parse args
     const pid: Proc.SupervisorPID = @intCast(notif.pid);
     const fd: i32 = @bitCast(@as(u32, @truncate(notif.data.arg0)));
+    const iovec_ptr: u64 = notif.data.arg1;
+    const iovec_count: usize = @min(@as(usize, @truncate(notif.data.arg2)), MAX_IOV);
 
     // Continue in case of stdout or stderr
     // In the future we'll virtualize this ourselves for more control of where logs go
@@ -42,8 +45,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     };
 
     // Read iovec array from child memory
-    const iovec_ptr: u64 = notif.data.arg1;
-    const iovec_count: usize = @min(@as(usize, @truncate(notif.data.arg2)), MAX_IOV);
     var iovecs: [MAX_IOV]posix.iovec_const = undefined;
     var data_buf: [4096]u8 = undefined;
     var data_len: usize = 0;
@@ -78,4 +79,131 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
     logger.log("writev: wrote {d} bytes", .{n});
     return replySuccess(notif.id, @intCast(n));
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+const testing = std.testing;
+const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
+const isError = @import("../../../seccomp/notif.zig").isError;
+const isContinue = @import("../../../seccomp/notif.zig").isContinue;
+const Procs = @import("../../proc/Procs.zig");
+const OverlayRoot = @import("../../OverlayRoot.zig");
+
+fn testSupervisor() !*Supervisor {
+    const allocator = testing.allocator;
+    const supervisor = try allocator.create(Supervisor);
+    supervisor.* = .{
+        .allocator = allocator,
+        .io = undefined,
+        .init_guest_pid = 100,
+        .notify_fd = -1,
+        .logger = .{ .name = .supervisor },
+        .guest_procs = Procs.init(allocator),
+        .overlay = .{ .uid = "testtesttesttest".* },
+    };
+    return supervisor;
+}
+
+fn cleanupSupervisor(supervisor: *Supervisor) void {
+    supervisor.guest_procs.deinit();
+    supervisor.allocator.destroy(supervisor);
+}
+
+test "writev to stdout returns continue" {
+    const supervisor = try testSupervisor();
+    defer cleanupSupervisor(supervisor);
+
+    const data1 = "hello";
+    const data2 = "world";
+    var iovecs = [_]posix.iovec_const{
+        .{ .base = data1.ptr, .len = data1.len },
+        .{ .base = data2.ptr, .len = data2.len },
+    };
+
+    const notif = makeNotif(.writev, .{
+        .pid = 100,
+        .arg0 = linux.STDOUT_FILENO,
+        .arg1 = @intFromPtr(&iovecs),
+        .arg2 = iovecs.len,
+    });
+
+    const resp = handle(notif, supervisor);
+    try testing.expect(isContinue(resp));
+}
+
+test "writev to stderr returns continue" {
+    const supervisor = try testSupervisor();
+    defer cleanupSupervisor(supervisor);
+
+    const data = "error";
+    var iovecs = [_]posix.iovec_const{
+        .{ .base = data.ptr, .len = data.len },
+    };
+
+    const notif = makeNotif(.writev, .{
+        .pid = 100,
+        .arg0 = linux.STDERR_FILENO,
+        .arg1 = @intFromPtr(&iovecs),
+        .arg2 = iovecs.len,
+    });
+
+    const resp = handle(notif, supervisor);
+    try testing.expect(isContinue(resp));
+}
+
+test "writev to invalid fd returns EBADF" {
+    const supervisor = try testSupervisor();
+    defer cleanupSupervisor(supervisor);
+
+    try supervisor.guest_procs.handleInitialProcess(100);
+
+    const data = "data";
+    var iovecs = [_]posix.iovec_const{
+        .{ .base = data.ptr, .len = data.len },
+    };
+
+    const notif = makeNotif(.writev, .{
+        .pid = 100,
+        .arg0 = 99, // invalid fd
+        .arg1 = @intFromPtr(&iovecs),
+        .arg2 = iovecs.len,
+    });
+
+    const resp = handle(notif, supervisor);
+    try testing.expect(isError(resp));
+    try testing.expectEqual(@as(i32, -@as(i32, @intCast(@intFromEnum(linux.E.BADF)))), resp.@"error");
+}
+
+test "writev gathers data from multiple iovecs" {
+    const supervisor = try testSupervisor();
+    defer cleanupSupervisor(supervisor);
+
+    try supervisor.guest_procs.handleInitialProcess(100);
+    const proc = supervisor.guest_procs.lookup.get(100).?;
+
+    // Insert a proc file (writes will fail with EIO since proc is read-only)
+    const file = File{ .proc = .{ .guest_pid = 1, .offset = 0 } };
+    const vfd = try proc.fd_table.insert(file);
+
+    const data1 = "hello";
+    const data2 = "world";
+    var iovecs = [_]posix.iovec_const{
+        .{ .base = data1.ptr, .len = data1.len },
+        .{ .base = data2.ptr, .len = data2.len },
+    };
+
+    const notif = makeNotif(.writev, .{
+        .pid = 100,
+        .arg0 = @as(u32, @bitCast(vfd)),
+        .arg1 = @intFromPtr(&iovecs),
+        .arg2 = iovecs.len,
+    });
+
+    const resp = handle(notif, supervisor);
+    // Proc files are read-only, so write returns EIO
+    try testing.expect(isError(resp));
+    try testing.expectEqual(@as(i32, -@as(i32, @intCast(@intFromEnum(linux.E.IO)))), resp.@"error");
 }

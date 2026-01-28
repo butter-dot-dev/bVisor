@@ -22,8 +22,11 @@ const MAX_IOV = 16;
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
     const logger = supervisor.logger;
 
+    // Parse args
     const pid: Proc.SupervisorPID = @intCast(notif.pid);
     const fd: i32 = @bitCast(@as(u32, @truncate(notif.data.arg0)));
+    const iovec_ptr: u64 = notif.data.arg1;
+    const iovec_count: usize = @min(@as(usize, @truncate(notif.data.arg2)), MAX_IOV);
 
     // Handle stdin - passthrough to kernel
     if (fd == linux.STDIN_FILENO) {
@@ -44,8 +47,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     };
 
     // Read iovec array from child memory
-    const iovec_ptr: u64 = notif.data.arg1;
-    const iovec_count: usize = @min(@as(usize, @truncate(notif.data.arg2)), MAX_IOV);
     var iovecs: [MAX_IOV]posix.iovec = undefined;
     var total_requested: usize = 0;
 
@@ -91,4 +92,108 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     return replySuccess(notif.id, @intCast(n));
 }
 
-//todo: reintroduce tests when File backends are implemented
+// ============================================================================
+// Tests
+// ============================================================================
+
+const Procs = @import("../../proc/Procs.zig");
+const OverlayRoot = @import("../../OverlayRoot.zig");
+
+fn testSupervisor() !*Supervisor {
+    const allocator = testing.allocator;
+    const supervisor = try allocator.create(Supervisor);
+    supervisor.* = .{
+        .allocator = allocator,
+        .io = undefined,
+        .init_guest_pid = 100,
+        .notify_fd = -1,
+        .logger = .{ .name = .supervisor },
+        .guest_procs = Procs.init(allocator),
+        .overlay = .{ .uid = "testtesttesttest".* },
+    };
+    return supervisor;
+}
+
+fn cleanupSupervisor(supervisor: *Supervisor) void {
+    supervisor.guest_procs.deinit();
+    supervisor.allocator.destroy(supervisor);
+}
+
+test "readv from stdin returns continue" {
+    const supervisor = try testSupervisor();
+    defer cleanupSupervisor(supervisor);
+
+    var buf: [32]u8 = undefined;
+    var iovecs = [_]posix.iovec{
+        .{ .base = &buf, .len = buf.len },
+    };
+
+    const notif = makeNotif(.readv, .{
+        .pid = 100,
+        .arg0 = linux.STDIN_FILENO,
+        .arg1 = @intFromPtr(&iovecs),
+        .arg2 = iovecs.len,
+    });
+
+    const resp = handle(notif, supervisor);
+    try testing.expect(isContinue(resp));
+}
+
+test "readv from invalid fd returns EBADF" {
+    const supervisor = try testSupervisor();
+    defer cleanupSupervisor(supervisor);
+
+    try supervisor.guest_procs.handleInitialProcess(100);
+
+    var buf: [32]u8 = undefined;
+    var iovecs = [_]posix.iovec{
+        .{ .base = &buf, .len = buf.len },
+    };
+
+    const notif = makeNotif(.readv, .{
+        .pid = 100,
+        .arg0 = 99, // invalid fd
+        .arg1 = @intFromPtr(&iovecs),
+        .arg2 = iovecs.len,
+    });
+
+    const resp = handle(notif, supervisor);
+    try testing.expect(isError(resp));
+    try testing.expectEqual(@as(i32, -@as(i32, @intCast(@intFromEnum(linux.E.BADF)))), resp.@"error");
+}
+
+test "readv distributes data across multiple iovecs" {
+    const supervisor = try testSupervisor();
+    defer cleanupSupervisor(supervisor);
+
+    try supervisor.guest_procs.handleInitialProcess(100);
+    const proc = supervisor.guest_procs.lookup.get(100).?;
+
+    // Insert a proc file for guest pid 12345 (produces "12345\n")
+    const file = File{ .proc = .{ .guest_pid = 12345, .offset = 0 } };
+    const vfd = try proc.fd_table.insert(file);
+
+    // Use two small buffers to test distribution
+    var buf1: [3]u8 = undefined;
+    var buf2: [3]u8 = undefined;
+    var iovecs = [_]posix.iovec{
+        .{ .base = &buf1, .len = buf1.len },
+        .{ .base = &buf2, .len = buf2.len },
+    };
+
+    const notif = makeNotif(.readv, .{
+        .pid = 100,
+        .arg0 = @as(u32, @bitCast(vfd)),
+        .arg1 = @intFromPtr(&iovecs),
+        .arg2 = iovecs.len,
+    });
+
+    const resp = handle(notif, supervisor);
+    try testing.expect(!isError(resp));
+    try testing.expectEqual(@as(i64, 6), resp.val);
+
+    // First buffer should have "123"
+    try testing.expectEqualStrings("123", &buf1);
+    // Second buffer should have "45\n"
+    try testing.expectEqualStrings("45\n", &buf2);
+}

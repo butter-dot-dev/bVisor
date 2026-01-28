@@ -83,4 +83,117 @@ pub fn remove(self: *Self, vfd: VirtualFD) bool {
     return self.open_files.remove(vfd);
 }
 
-//todo: reintroduce tests when File backends are implemented
+// ============================================================================
+// Tests
+// ============================================================================
+
+const testing = std.testing;
+const Proc = @import("backend/proc.zig").Proc;
+
+test "insert returns incrementing vfds starting at 3" {
+    const table = try Self.init(testing.allocator);
+    defer table.unref();
+
+    const file1 = File{ .proc = .{ .guest_pid = 1, .offset = 0 } };
+    const file2 = File{ .proc = .{ .guest_pid = 2, .offset = 0 } };
+    const file3 = File{ .proc = .{ .guest_pid = 3, .offset = 0 } };
+
+    const vfd1 = try table.insert(file1);
+    const vfd2 = try table.insert(file2);
+    const vfd3 = try table.insert(file3);
+
+    try testing.expectEqual(@as(VirtualFD, 3), vfd1);
+    try testing.expectEqual(@as(VirtualFD, 4), vfd2);
+    try testing.expectEqual(@as(VirtualFD, 5), vfd3);
+}
+
+test "get returns pointer to file" {
+    const table = try Self.init(testing.allocator);
+    defer table.unref();
+
+    const file = File{ .proc = .{ .guest_pid = 42, .offset = 0 } };
+    const vfd = try table.insert(file);
+
+    const retrieved = table.get(vfd);
+    try testing.expect(retrieved != null);
+    try testing.expectEqual(@as(i32, 42), retrieved.?.proc.guest_pid);
+}
+
+test "get on missing vfd returns null" {
+    const table = try Self.init(testing.allocator);
+    defer table.unref();
+
+    const retrieved = table.get(99);
+    try testing.expect(retrieved == null);
+}
+
+test "remove returns true for existing vfd" {
+    const table = try Self.init(testing.allocator);
+    defer table.unref();
+
+    const file = File{ .proc = .{ .guest_pid = 1, .offset = 0 } };
+    const vfd = try table.insert(file);
+
+    const removed = table.remove(vfd);
+    try testing.expect(removed);
+    try testing.expect(table.get(vfd) == null);
+}
+
+test "remove returns false for missing vfd" {
+    const table = try Self.init(testing.allocator);
+    defer table.unref();
+
+    const removed = table.remove(99);
+    try testing.expect(!removed);
+}
+
+test "CLONE_FILES scenario: shared table, changes visible to both" {
+    const table = try Self.init(testing.allocator);
+    defer table.unref();
+
+    // Simulate CLONE_FILES by ref'ing the same table
+    const shared = table.ref();
+    defer shared.unref();
+
+    // Insert via original
+    const file = File{ .proc = .{ .guest_pid = 1, .offset = 0 } };
+    const vfd = try table.insert(file);
+
+    // Should be visible via shared reference
+    try testing.expect(shared.get(vfd) != null);
+
+    // Remove via shared reference
+    _ = shared.remove(vfd);
+
+    // Should be gone from both
+    try testing.expect(table.get(vfd) == null);
+    try testing.expect(shared.get(vfd) == null);
+}
+
+test "CLONE_FILES not set: cloned table, changes independent" {
+    const original = try Self.init(testing.allocator);
+    defer original.unref();
+
+    // Insert a file into original
+    const file = File{ .proc = .{ .guest_pid = 1, .offset = 0 } };
+    const vfd = try original.insert(file);
+
+    // Clone the table (simulates fork without CLONE_FILES)
+    const cloned = try original.clone(testing.allocator);
+    defer cloned.unref();
+
+    // Both should have the file initially
+    try testing.expect(original.get(vfd) != null);
+    try testing.expect(cloned.get(vfd) != null);
+
+    // Remove from cloned - should not affect original
+    _ = cloned.remove(vfd);
+    try testing.expect(original.get(vfd) != null);
+    try testing.expect(cloned.get(vfd) == null);
+
+    // Insert into original - should not affect cloned
+    const file2 = File{ .proc = .{ .guest_pid = 2, .offset = 0 } };
+    const vfd2 = try original.insert(file2);
+    try testing.expect(original.get(vfd2) != null);
+    try testing.expect(cloned.get(vfd2) == null);
+}

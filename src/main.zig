@@ -8,11 +8,16 @@ test {
     _ = @import("Supervisor.zig");
     _ = @import("virtual/proc/Procs.zig");
     _ = @import("virtual/fs/FdTable.zig");
+    _ = @import("virtual/path.zig");
+    _ = @import("virtual/fs/backend/proc.zig");
+    _ = @import("virtual/fs/backend/cow.zig");
+    _ = @import("virtual/fs/backend/tmp.zig");
     _ = @import("virtual/syscall/handlers/exit_group.zig");
     _ = @import("virtual/syscall/handlers/getpid.zig");
     _ = @import("virtual/syscall/handlers/getppid.zig");
     _ = @import("virtual/syscall/handlers/kill.zig");
     _ = @import("virtual/syscall/handlers/openat.zig");
+    _ = @import("virtual/syscall/handlers/close.zig");
     _ = @import("virtual/syscall/handlers/read.zig");
     _ = @import("virtual/syscall/handlers/readv.zig");
     _ = @import("virtual/syscall/handlers/write.zig");

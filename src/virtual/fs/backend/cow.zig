@@ -6,7 +6,7 @@ pub const Cow = union(enum) {
     passthrough: posix.fd_t,
     writecopy: posix.fd_t,
 
-    pub fn open(path: []const u8, flags: posix.O, mode: posix.mode_t, overlay: *OverlayRoot) !Cow {
+    pub fn open(overlay: *OverlayRoot, path: []const u8, flags: posix.O, mode: posix.mode_t) !Cow {
         _ = path;
         _ = flags;
         _ = mode;
@@ -34,3 +34,22 @@ pub const Cow = union(enum) {
         //todo: posix.close on fd
     }
 };
+
+// ============================================================================
+// Tests - to implement
+// ============================================================================
+
+const testing = std.testing;
+const builtin = @import("builtin");
+
+test "open file for read (passthrough mode) succeeds" {}
+
+test "read from passthrough returns host file content" {}
+
+test "write to passthrough returns ReadOnlyFileSystem" {}
+
+test "open file for write triggers copy to overlay" {}
+
+test "write to writecopy succeeds" {}
+
+test "close cow file, reopen in read mode reads from cow overlay" {}

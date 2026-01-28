@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const linux = std.os.linux;
 const posix = std.posix;
 const Io = std.Io;
@@ -32,7 +33,8 @@ pub fn init(allocator: Allocator, io: Io, notify_fd: SupervisorFD, init_guest_pi
     errdefer guest_procs.deinit();
     _ = try guest_procs.handleInitialProcess(init_guest_pid);
 
-    var overlay = try OverlayRoot.init(io);
+    const uid = generateUid();
+    var overlay = try OverlayRoot.init(io, uid);
     errdefer overlay.deinit(io);
 
     return .{
@@ -44,6 +46,16 @@ pub fn init(allocator: Allocator, io: Io, notify_fd: SupervisorFD, init_guest_pi
         .guest_procs = guest_procs,
         .overlay = overlay,
     };
+}
+
+fn generateUid() [16]u8 {
+    var uid_bytes: [8]u8 = undefined;
+    if (builtin.is_test) {
+        @memcpy(&uid_bytes, "testtest");
+    } else {
+        std.crypto.random.bytes(&uid_bytes);
+    }
+    return std.fmt.bytesToHex(uid_bytes, .lower);
 }
 
 pub fn deinit(self: *Self) void {

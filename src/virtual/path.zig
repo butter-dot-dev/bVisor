@@ -2,7 +2,7 @@ const std = @import("std");
 const FileBackend = @import("fs/file.zig").FileBackend;
 
 pub const RouteResult = union(enum) {
-    block: void,
+    block: void, // deny access with EPERM
     handle: FileBackend,
 };
 
@@ -44,7 +44,18 @@ const router_rules: []const Rule = &.{
     // Hard blocks
     .{ .prefix = "/sys", .node = .{ .terminal = .block } },
     .{ .prefix = "/run", .node = .{ .terminal = .block } },
-    .{ .prefix = "/dev", .node = .{ .terminal = .block } },
+
+    // Block /dev by default
+    // Except safe devs
+    .{ .prefix = "/dev", .node = .{ .branch = .{
+        .subrules = &.{
+            .{ .prefix = "null", .node = .{ .terminal = .{ .handle = .passthrough } } },
+            .{ .prefix = "zero", .node = .{ .terminal = .{ .handle = .passthrough } } },
+            .{ .prefix = "random", .node = .{ .terminal = .{ .handle = .passthrough } } },
+            .{ .prefix = "urandom", .node = .{ .terminal = .{ .handle = .passthrough } } },
+        },
+        .default = .block,
+    } } },
 
     // Proc symbolic path gets special virtualization
     .{ .prefix = "/proc", .node = .{ .terminal = .{ .handle = .proc } } },
@@ -72,3 +83,69 @@ const Rule = struct {
     prefix: []const u8,
     node: Node,
 };
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+const testing = std.testing;
+
+test "/etc/passwd routes to cow" {
+    const result = try route("/etc/passwd");
+    try testing.expectEqual(RouteResult{ .handle = .cow }, result);
+}
+
+test "/usr/bin/ls routes to cow" {
+    const result = try route("/usr/bin/ls");
+    try testing.expectEqual(RouteResult{ .handle = .cow }, result);
+}
+
+test "/proc/self routes to proc" {
+    const result = try route("/proc/self");
+    try testing.expectEqual(RouteResult{ .handle = .proc }, result);
+}
+
+test "/proc/123/status routes to proc" {
+    const result = try route("/proc/123/status");
+    try testing.expectEqual(RouteResult{ .handle = .proc }, result);
+}
+
+test "/tmp/foo.txt routes to tmp" {
+    const result = try route("/tmp/foo.txt");
+    try testing.expectEqual(RouteResult{ .handle = .tmp }, result);
+}
+
+test "/tmp/.bvisor/secret is blocked" {
+    const result = try route("/tmp/.bvisor/secret");
+    try testing.expectEqual(RouteResult.block, result);
+}
+
+test "/sys/class/net is blocked" {
+    const result = try route("/sys/class/net");
+    try testing.expectEqual(RouteResult.block, result);
+}
+
+test "/run/lock is blocked" {
+    const result = try route("/run/lock");
+    try testing.expectEqual(RouteResult.block, result);
+}
+
+test "/dev/sdb is blocked" {
+    const result = try route("/dev/sdb");
+    try testing.expectEqual(RouteResult.block, result);
+}
+
+test "/dev/null is allowed" {
+    const result = try route("/dev/null");
+    try testing.expectEqual(RouteResult{ .handle = .passthrough }, result);
+}
+
+test "path traversal /../etc/passwd normalized to /etc/passwd routes to cow" {
+    const result = try route("/../etc/passwd");
+    try testing.expectEqual(RouteResult{ .handle = .cow }, result);
+}
+
+test "path traversal /tmp/../etc/passwd routes to cow (escaped /tmp)" {
+    const result = try route("/tmp/../etc/passwd");
+    try testing.expectEqual(RouteResult{ .handle = .cow }, result);
+}

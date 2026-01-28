@@ -5,10 +5,9 @@ const Self = @This();
 
 uid: [16]u8,
 
-pub fn init(io: std.Io) !Self {
+pub fn init(io: std.Io, uid: [16]u8) !Self {
     _ = io;
-    //todo: generate uid, create /tmp/.bvisor/sb/<uid>/{cow,tmp}
-    return .{ .uid = undefined };
+    return .{ .uid = uid };
 }
 
 pub fn deinit(self: *Self, io: std.Io) void {

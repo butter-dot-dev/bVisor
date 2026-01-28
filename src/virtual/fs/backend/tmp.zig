@@ -5,7 +5,7 @@ const OverlayRoot = @import("../../OverlayRoot.zig");
 pub const Tmp = struct {
     fd: posix.fd_t,
 
-    pub fn open(path: []const u8, flags: posix.O, mode: posix.mode_t, overlay: *OverlayRoot) !Tmp {
+    pub fn open(overlay: *OverlayRoot, path: []const u8, flags: posix.O, mode: posix.mode_t) !Tmp {
         _ = path;
         _ = flags;
         _ = mode;
@@ -33,3 +33,9 @@ pub const Tmp = struct {
         //todo: posix.close(self.fd)
     }
 };
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+const testing = std.testing;
