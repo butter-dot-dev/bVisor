@@ -6,6 +6,8 @@ Inspired by [gVisor](https://github.com/google/gVisor), bVisor runs workloads di
 
 Unlike gVisor, bVisor is built to run directly in your application, spinning up and tearing down sandboxes in milliseconds. This makes it ideal for ephemeral tasks commonly performed by LLM agents, such as code execution or filesystem operations.
 
+It is currently a proof-of-concept, and not something you'd be able to easily use yet. But soon!
+
 ## Architecture
 
 bVisor is built on [Seccomp user notifier](https://man7.org/linux/man-pages/man2/seccomp.2.html), a Linux kernel feature that allows userspace processes to intercept and optionally handle syscalls from a child process. This allows bVisor to block or mock the kernel API (such as filesystem read/write, network access, etc.) to ensure the child process remains sandboxed. 
