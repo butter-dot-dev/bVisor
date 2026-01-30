@@ -3,6 +3,10 @@ const linux = std.os.linux;
 const posix = std.posix;
 const Proc = @import("../../proc/Proc.zig");
 const File = @import("../../fs/file.zig").File;
+const Passthrough = @import("../../fs/backend/passthrough.zig").Passthrough;
+const Cow = @import("../../fs/backend/cow.zig").Cow;
+const Tmp = @import("../../fs/backend/tmp.zig").Tmp;
+const ProcFile = @import("../../fs/backend/procfile.zig").ProcFile;
 const path_router = @import("../../path.zig");
 const Supervisor = @import("../../../Supervisor.zig");
 const types = @import("../../../types.zig");
@@ -59,9 +63,23 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
             const mode: posix.mode_t = @truncate(notif.data.arg3);
 
             // Open the file via the appropriate backend
-            const file = File.open(backend, &supervisor.overlay, path, flags, mode) catch |err| {
-                logger.log("openat: failed to open {s}: {s}", .{ path, @errorName(err) });
-                return replyErr(notif.id, .IO);
+            const file: File = switch (backend) {
+                .passthrough => .{ .passthrough = Passthrough.open(&supervisor.overlay, path, flags, mode) catch |err| {
+                    logger.log("openat: failed to open {s}: {s}", .{ path, @errorName(err) });
+                    return replyErr(notif.id, .IO);
+                } },
+                .cow => .{ .cow = Cow.open(&supervisor.overlay, path, flags, mode) catch |err| {
+                    logger.log("openat: failed to open {s}: {s}", .{ path, @errorName(err) });
+                    return replyErr(notif.id, .IO);
+                } },
+                .tmp => .{ .tmp = Tmp.open(&supervisor.overlay, path, flags, mode) catch |err| {
+                    logger.log("openat: failed to open {s}: {s}", .{ path, @errorName(err) });
+                    return replyErr(notif.id, .IO);
+                } },
+                .proc => .{ .proc = ProcFile.open(proc, path) catch |err| {
+                    logger.log("openat: failed to open {s}: {s}", .{ path, @errorName(err) });
+                    return replyErr(notif.id, if (err == error.FileNotFound) .NOENT else .IO);
+                } },
             };
 
             // Insert into fd table and return the virtual fd

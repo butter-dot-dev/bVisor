@@ -9,7 +9,7 @@ test {
     _ = @import("virtual/proc/Procs.zig");
     _ = @import("virtual/fs/FdTable.zig");
     _ = @import("virtual/path.zig");
-    _ = @import("virtual/fs/backend/proc.zig");
+    _ = @import("virtual/fs/backend/procfile.zig");
     _ = @import("virtual/fs/backend/cow.zig");
     _ = @import("virtual/fs/backend/tmp.zig");
     _ = @import("virtual/syscall/handlers/exit_group.zig");

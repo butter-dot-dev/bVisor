@@ -88,7 +88,7 @@ pub fn remove(self: *Self, vfd: VirtualFD) bool {
 // ============================================================================
 
 const testing = std.testing;
-const Proc = @import("backend/proc.zig").Proc;
+const ProcFile = @import("backend/procfile.zig").ProcFile;
 
 test "insert returns incrementing vfds starting at 3" {
     const table = try Self.init(testing.allocator);
