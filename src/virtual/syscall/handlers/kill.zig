@@ -8,8 +8,8 @@ const NsPid = Proc.NsPid;
 const Procs = @import("../../proc/Procs.zig");
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
+const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 const isError = @import("../../../seccomp/notif.zig").isError;
 
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
@@ -23,9 +23,9 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         return replyErr(notif.id, .INVAL);
     }
 
-    // Sync supervisor's procs with the kernel
     supervisor.guest_procs.syncNewProcs() catch |err| {
-        std.log.warn("getpid: syncNewProcs failed: {}", .{err});
+        std.log.err("kill: syncNewProcs failed: {}", .{err});
+        return replyErr(notif.id, .NOSYS);
     };
 
     // Get references to the caller and target processes

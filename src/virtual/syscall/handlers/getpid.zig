@@ -17,7 +17,8 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
     // Sync supervisor's procs with the kernel
     supervisor.guest_procs.syncNewProcs() catch |err| {
-        std.log.warn("getpid: syncNewProcs failed: {}", .{err});
+        std.log.err("getpid: syncNewProcs failed: {}", .{err});
+        return replyErr(notif.id, .NOSYS);
     };
 
     const caller_proc = supervisor.guest_procs.get(caller_pid) catch |err| {
