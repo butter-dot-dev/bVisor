@@ -851,20 +851,20 @@ test "stress: verify NsPid mapping correctness across namespaces" {
 
     // Verify NsPid from each namespace's perspective
     // From root namespace, child's NsPid should be 200
-    const child_gpid_from_root = root.namespace.getNsPid(child);
-    try std.testing.expectEqual(@as(?NsPid, 200), child_gpid_from_root);
+    const child_nspid_from_root = root.namespace.getNsPid(child);
+    try std.testing.expectEqual(@as(?NsPid, 200), child_nspid_from_root);
 
     // From child's namespace, child's NsPid should be 1
-    const child_gpid_from_self = child.namespace.getNsPid(child);
-    try std.testing.expectEqual(@as(?NsPid, 1), child_gpid_from_self);
+    const child_nspid_from_self = child.namespace.getNsPid(child);
+    try std.testing.expectEqual(@as(?NsPid, 1), child_nspid_from_self);
 
     // Root should not be visible from child's namespace
-    const root_gpid_from_child = child.namespace.getNsPid(root);
-    try std.testing.expectEqual(@as(?NsPid, null), root_gpid_from_child);
+    const root_nspid_from_child = child.namespace.getNsPid(root);
+    try std.testing.expectEqual(@as(?NsPid, null), root_nspid_from_child);
 
     // Root's NsPid from root namespace should be 100
-    const root_gpid_from_self = root.namespace.getNsPid(root);
-    try std.testing.expectEqual(@as(?NsPid, 100), root_gpid_from_self);
+    const root_nspid_from_self = root.namespace.getNsPid(root);
+    try std.testing.expectEqual(@as(?NsPid, 100), root_nspid_from_self);
 
     // Add grandchild: child(200) -> grandchild(300) in same namespace as child
     // NSpid for grandchild: [300, 2] meaning:
@@ -880,12 +880,12 @@ test "stress: verify NsPid mapping correctness across namespaces" {
 
     // Verify NsPid of grandchild
     //  from root's perspective
-    const gc_gpid_from_root = root.namespace.getNsPid(grandchild);
-    try std.testing.expectEqual(@as(?NsPid, 300), gc_gpid_from_root);
+    const gc_nspid_from_root = root.namespace.getNsPid(grandchild);
+    try std.testing.expectEqual(@as(?NsPid, 300), gc_nspid_from_root);
 
     //  from child's perspective
-    const gc_gpid_from_child_ns = child.namespace.getNsPid(grandchild);
-    try std.testing.expectEqual(@as(?NsPid, 2), gc_gpid_from_child_ns);
+    const gc_nspid_from_child_ns = child.namespace.getNsPid(grandchild);
+    try std.testing.expectEqual(@as(?NsPid, 2), gc_nspid_from_child_ns);
 
     // Lookup by NsPid from child's namespace
     const found_child = child.namespace.procs.get(1);

@@ -23,7 +23,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     const logger = supervisor.logger;
 
     // Parse args
-    const pid: Proc.AbsPid = @intCast(notif.pid);
+    const caller_pid: Proc.AbsPid = @intCast(notif.pid);
     const fd: i32 = @bitCast(@as(u32, @truncate(notif.data.arg0)));
     const iovec_ptr: u64 = notif.data.arg1;
     const iovec_count: usize = @min(@as(usize, @truncate(notif.data.arg2)), MAX_IOV);
@@ -34,13 +34,13 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         return replyContinue(notif.id);
     }
 
-    const proc = supervisor.guest_procs.get(pid) catch |err| {
-        logger.log("readv: process not found for pid={d}: {}", .{ pid, err });
+    const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
+        logger.log("readv: process not found for pid={d}: {}", .{ caller_pid, err });
         return replyErr(notif.id, .SRCH);
     };
 
     // Look up the virtual FD
-    const file = proc.fd_table.get(fd) orelse {
+    const file = caller.fd_table.get(fd) orelse {
         logger.log("readv: EBADF for fd={d}", .{fd});
         return replyErr(notif.id, .BADF);
     };
@@ -51,7 +51,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
     for (0..iovec_count) |i| {
         const iov_addr = iovec_ptr + i * @sizeOf(posix.iovec);
-        iovecs[i] = memory_bridge.read(posix.iovec, pid, iov_addr) catch {
+        iovecs[i] = memory_bridge.read(posix.iovec, caller_pid, iov_addr) catch {
             return replyErr(notif.id, .FAULT);
         };
         total_requested += iovecs[i].len;
@@ -80,7 +80,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         const to_write = @min(iov.len, remaining);
 
         if (to_write > 0) {
-            memory_bridge.writeSlice(read_buf[bytes_written..][0..to_write], pid, buf_ptr) catch {
+            memory_bridge.writeSlice(read_buf[bytes_written..][0..to_write], caller_pid, buf_ptr) catch {
                 return replyErr(notif.id, .FAULT);
             };
             bytes_written += to_write;

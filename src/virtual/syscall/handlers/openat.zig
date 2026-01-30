@@ -20,17 +20,17 @@ const memory_bridge = deps.memory_bridge;
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
     const logger = supervisor.logger;
 
-    const pid: Proc.AbsPid = @intCast(notif.pid);
+    const caller_pid: Proc.AbsPid = @intCast(notif.pid);
 
-    const proc = supervisor.guest_procs.get(pid) catch |err| {
-        logger.log("openat: process not found for pid={d}: {}", .{ pid, err });
+    const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
+        logger.log("openat: process not found for pid={d}: {}", .{ caller_pid, err });
         return replyErr(notif.id, .SRCH);
     };
 
-    // Read path from guest memory
+    // Read path from caller's memory
     const path_ptr: u64 = notif.data.arg1;
     var path_buf: [256]u8 = undefined;
-    const path = memory_bridge.readString(&path_buf, pid, path_ptr) catch |err| {
+    const path = memory_bridge.readString(&path_buf, caller_pid, path_ptr) catch |err| {
         logger.log("openat: failed to read path string: {}", .{err});
         return replyErr(notif.id, .FAULT);
     };
@@ -83,14 +83,14 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
                     logger.log("openat: failed to open {s}: {s}", .{ path, @errorName(err) });
                     return replyErr(notif.id, .IO);
                 } },
-                .proc => .{ .proc = ProcFile.open(proc, path) catch |err| {
+                .proc => .{ .proc = ProcFile.open(caller, path) catch |err| {
                     logger.log("openat: failed to open {s}: {s}", .{ path, @errorName(err) });
                     return replyErr(notif.id, if (err == error.FileNotFound) .NOENT else .IO);
                 } },
             };
 
             // Insert into fd table and return the virtual fd
-            const vfd = proc.fd_table.insert(file) catch {
+            const vfd = caller.fd_table.insert(file) catch {
                 logger.log("openat: failed to insert fd", .{});
                 return replyErr(notif.id, .MFILE);
             };

@@ -10,7 +10,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     const logger = supervisor.logger;
 
     // Parse args
-    const pid: Proc.AbsPid = @intCast(notif.pid);
+    const caller_pid: Proc.AbsPid = @intCast(notif.pid);
     const fd: i32 = @bitCast(@as(u32, @truncate(notif.data.arg0)));
 
     // Passthrough stdin/stdout/stderr
@@ -19,13 +19,13 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         return replyContinue(notif.id);
     }
 
-    const proc = supervisor.guest_procs.get(pid) catch |err| {
-        logger.log("close: process not found for pid={d}: {}", .{ pid, err });
+    const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
+        logger.log("close: process not found for pid={d}: {}", .{ caller_pid, err });
         return replyErr(notif.id, .SRCH);
     };
 
     // Look up the file in the fd table
-    const file = proc.fd_table.get(fd) orelse {
+    const file = caller.fd_table.get(fd) orelse {
         logger.log("close: EBADF for fd={d}", .{fd});
         return replyErr(notif.id, .BADF);
     };
@@ -34,7 +34,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     file.close();
 
     // Remove from fd table
-    _ = proc.fd_table.remove(fd);
+    _ = caller.fd_table.remove(fd);
 
     logger.log("close: closed fd={d}", .{fd});
     return replySuccess(notif.id, 0);

@@ -20,7 +20,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     const logger = supervisor.logger;
 
     // Parse args
-    const pid: Proc.AbsPid = @intCast(notif.pid);
+    const caller_pid: Proc.AbsPid = @intCast(notif.pid);
     const fd: i32 = @bitCast(@as(u32, @truncate(notif.data.arg0)));
     const iovec_ptr: u64 = notif.data.arg1;
     const iovec_count: usize = @min(@as(usize, @truncate(notif.data.arg2)), MAX_IOV);
@@ -31,13 +31,13 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         return replyContinue(notif.id);
     }
 
-    const proc = supervisor.guest_procs.get(pid) catch |err| {
-        logger.log("writev: process not found for pid={d}: {}", .{ pid, err });
+    const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
+        logger.log("writev: process not found for pid={d}: {}", .{ caller_pid, err });
         return replyErr(notif.id, .SRCH);
     };
 
     // Look up the file object
-    const file = proc.fd_table.get(fd) orelse {
+    const file = caller.fd_table.get(fd) orelse {
         logger.log("writev: EBADF for fd={d}", .{fd});
         return replyErr(notif.id, .BADF);
     };
@@ -49,7 +49,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
     for (0..iovec_count) |i| {
         const iov_addr = iovec_ptr + i * @sizeOf(posix.iovec_const);
-        iovecs[i] = memory_bridge.read(posix.iovec_const, pid, iov_addr) catch {
+        iovecs[i] = memory_bridge.read(posix.iovec_const, caller_pid, iov_addr) catch {
             return replyErr(notif.id, .FAULT);
         };
     }
@@ -62,7 +62,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
         if (buf_len > 0) {
             const dest = data_buf[data_len..][0..buf_len];
-            memory_bridge.readSlice(dest, pid, buf_ptr) catch {
+            memory_bridge.readSlice(dest, caller_pid, buf_ptr) catch {
                 return replyErr(notif.id, .FAULT);
             };
             data_len += buf_len;

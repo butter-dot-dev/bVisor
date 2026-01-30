@@ -12,12 +12,12 @@ const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
     const caller_pid: AbsPid = @intCast(notif.pid);
 
-    const proc = supervisor.guest_procs.get(caller_pid) catch |err| {
+    const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
         std.log.err("gettid: process not found for pid={d}: {}", .{ caller_pid, err });
         return replyErr(notif.id, .SRCH);
     };
 
-    const ns_tid = proc.namespace.getNsPid(proc) orelse std.debug.panic("gettid: supervisor invariant violated - proc's namespace doesn't contain itself", .{});
+    const ns_tid = caller.namespace.getNsPid(caller) orelse std.debug.panic("gettid: supervisor invariant violated - proc's namespace doesn't contain itself", .{});
 
     // For main thread, tid == pid
     return replySuccess(notif.id, @intCast(ns_tid));

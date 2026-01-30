@@ -21,7 +21,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     const logger = supervisor.logger;
 
     // Parse args
-    const pid: Proc.AbsPid = @intCast(notif.pid);
+    const caller_pid: Proc.AbsPid = @intCast(notif.pid);
     const fd: i32 = @bitCast(@as(u32, @truncate(notif.data.arg0)));
     const buf_addr: u64 = notif.data.arg1;
     const count: usize = @truncate(notif.data.arg2);
@@ -32,13 +32,13 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         return replyContinue(notif.id);
     }
 
-    const proc = supervisor.guest_procs.get(pid) catch |err| {
-        logger.log("read: process not found for pid={d}: {}", .{ pid, err });
+    const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
+        logger.log("read: process not found for pid={d}: {}", .{ caller_pid, err });
         return replyErr(notif.id, .SRCH);
     };
 
     // Look up the virtual FD
-    const file = proc.fd_table.get(fd) orelse {
+    const file = caller.fd_table.get(fd) orelse {
         logger.log("read: EBADF for fd={d}", .{fd});
         return replyErr(notif.id, .BADF);
     };

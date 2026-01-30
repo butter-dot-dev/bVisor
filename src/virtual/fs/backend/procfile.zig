@@ -59,22 +59,22 @@ pub const ProcFile = struct {
 
         switch (target) {
             .self_pid => {
-                const guest_pid = caller.namespace.getNsPid(caller) orelse return error.FileNotFound;
-                self.content_len = formatPid(&self.content, guest_pid);
+                const ns_pid = caller.namespace.getNsPid(caller) orelse return error.FileNotFound;
+                self.content_len = formatPid(&self.content, ns_pid);
             },
             .self_status => {
                 self.content_len = formatStatus(&self.content, caller);
             },
-            .pid => |guest_pid| {
+            .pid => |ns_pid| {
                 // Note: this depends on syncNewProcs being called proactively, else risk a not-registered PID.
                 // This syncNewProcs is called one level up, in openat.
-                const target_proc = caller.namespace.procs.get(guest_pid) orelse return error.FileNotFound;
+                const target_proc = caller.namespace.procs.get(ns_pid) orelse return error.FileNotFound;
                 _ = target_proc;
-                self.content_len = formatPid(&self.content, guest_pid);
+                self.content_len = formatPid(&self.content, ns_pid);
             },
-            .pid_status => |guest_pid| {
+            .pid_status => |ns_pid| {
                 // Same case as above re: syncNewProcs
-                const target_proc = caller.namespace.procs.get(guest_pid) orelse return error.FileNotFound;
+                const target_proc = caller.namespace.procs.get(ns_pid) orelse return error.FileNotFound;
                 self.content_len = formatStatus(&self.content, target_proc);
             },
         }
@@ -88,9 +88,9 @@ pub const ProcFile = struct {
     }
 
     fn formatStatus(buf: *[256]u8, target: *Proc) usize {
-        const guest_pid = target.namespace.getNsPid(target) orelse 0;
+        const ns_pid = target.namespace.getNsPid(target) orelse 0;
 
-        // PPid: if target has a parent visible in the same namespace, use its guest PID. Otherwise 0.
+        // PPid: if target has a parent visible in the same namespace, use its NsPid. Otherwise 0.
         const ppid: Proc.NsPid = if (target.parent) |parent|
             target.namespace.getNsPid(parent) orelse 0
         else
@@ -99,7 +99,7 @@ pub const ProcFile = struct {
         // TODO: support more status content lookup, this isn't 100% compatible
         // We also use the same name for everything
         const name = "bvisor-guest";
-        const slice = std.fmt.bufPrint(buf, "Name:\t{s}\nPid:\t{d}\nPPid:\t{d}\n", .{ name, guest_pid, ppid }) catch unreachable;
+        const slice = std.fmt.bufPrint(buf, "Name:\t{s}\nPid:\t{d}\nPPid:\t{d}\n", .{ name, ns_pid, ppid }) catch unreachable;
         return slice.len;
     }
 
@@ -182,7 +182,7 @@ test "open /proc/self returns guest pid" {
     var file = try ProcFile.open(proc, "/proc/self");
     var buf: [64]u8 = undefined;
     const n = try file.read(&buf);
-    // Guest PID for root process is 100 (the supervisor PID used as guest PID in root namespace)
+    // Root process NsPid is 100 (the AbsPid used as NsPid in root namespace)
     try testing.expectEqualStrings("100\n", buf[0..n]);
 }
 
@@ -203,7 +203,7 @@ test "open /proc/self/status contains Pid and PPid" {
     const n = try file.read(&buf);
     const content = buf[0..n];
 
-    // Child's guest PID is 200, parent is 100
+    // Child's NsPid is 200, parent is 100
     try testing.expect(std.mem.indexOf(u8, content, "Pid:\t200\n") != null);
     try testing.expect(std.mem.indexOf(u8, content, "PPid:\t100\n") != null);
     try testing.expect(std.mem.indexOf(u8, content, "Name:\tbvisor-guest\n") != null);
@@ -218,7 +218,7 @@ test "open /proc/<N> returns pid for visible process" {
     const root = v_procs.lookup.get(100).?;
     _ = try v_procs.registerChild(root, 200, Procs.CloneFlags.from(0));
 
-    // Root can see child at guest PID 200
+    // Root can see child at NsPid 200
     var file = try ProcFile.open(root, "/proc/200");
     var buf: [64]u8 = undefined;
     const n = try file.read(&buf);
