@@ -23,7 +23,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     const logger = supervisor.logger;
 
     // Parse args
-    const pid: Proc.SupervisorPID = @intCast(notif.pid);
+    const pid: Proc.AbsPid = @intCast(notif.pid);
     const fd: i32 = @bitCast(@as(u32, @truncate(notif.data.arg0)));
     const iovec_ptr: u64 = notif.data.arg1;
     const iovec_count: usize = @min(@as(usize, @truncate(notif.data.arg2)), MAX_IOV);
@@ -34,7 +34,12 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         return replyContinue(notif.id);
     }
 
-    // Ensure calling process exists
+    // Sync and look up calling process
+    supervisor.guest_procs.syncNewProcs() catch |err| {
+        logger.log("readv: syncNewProcs failed: {}", .{err});
+        return replyErr(notif.id, .NOSYS);
+    };
+
     const proc = supervisor.guest_procs.get(pid) catch {
         logger.log("readv: process lookup failed for pid: {d}", .{pid});
         return replyErr(notif.id, .SRCH);

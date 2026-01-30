@@ -10,7 +10,6 @@ const ProcFile = @import("../../fs/backend/procfile.zig").ProcFile;
 const path_router = @import("../../path.zig");
 const Supervisor = @import("../../../Supervisor.zig");
 const types = @import("../../../types.zig");
-const SupervisorFD = types.SupervisorFD;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
 const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 
@@ -21,10 +20,15 @@ const memory_bridge = deps.memory_bridge;
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
     const logger = supervisor.logger;
 
-    const pid: Proc.SupervisorPID = @intCast(notif.pid);
+    const pid: Proc.AbsPid = @intCast(notif.pid);
+
+    supervisor.guest_procs.syncNewProcs() catch |err| {
+        logger.log("openat: syncNewProcs failed: {}", .{err});
+        return replyErr(notif.id, .NOSYS);
+    };
 
     // Ensure calling process exists
-    const proc = supervisor.guest_procs.lookup.get(pid) orelse {
+    const proc = supervisor.guest_procs.get(pid) catch {
         logger.log("openat: process lookup failed for pid: {d}", .{pid});
         return replyErr(notif.id, .SRCH);
     };
@@ -38,7 +42,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     };
 
     // Only absolute paths supported for now
-    const dirfd: SupervisorFD = @truncate(@as(i64, @bitCast(notif.data.arg0)));
+    const dirfd: i32 = @truncate(@as(i64, @bitCast(notif.data.arg0)));
     _ = dirfd; // dirfd only matters for relative paths
     if (path.len == 0 or path[0] != '/') {
         logger.log("openat: path must be absolute: {s}", .{path});

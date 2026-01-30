@@ -5,7 +5,6 @@ const posix = std.posix;
 const Io = std.Io;
 const types = @import("types.zig");
 const syscalls = @import("virtual/syscall/syscalls.zig");
-const SupervisorFD = types.SupervisorFD;
 const Result = types.LinuxResult;
 const Logger = types.Logger;
 const Procs = @import("virtual/proc/Procs.zig");
@@ -17,7 +16,7 @@ const Self = @This();
 allocator: Allocator,
 io: Io,
 init_guest_pid: linux.pid_t,
-notify_fd: SupervisorFD,
+notify_fd: linux.fd_t,
 logger: Logger,
 
 // All procs starting from the initial guest proc are assigned a virtual PID and tracked via guest_procs
@@ -27,7 +26,7 @@ guest_procs: Procs,
 // Overlay root for sandbox filesystem isolation (COW + private /tmp)
 overlay: OverlayRoot,
 
-pub fn init(allocator: Allocator, io: Io, notify_fd: SupervisorFD, init_guest_pid: linux.pid_t) !Self {
+pub fn init(allocator: Allocator, io: Io, notify_fd: linux.fd_t, init_guest_pid: linux.pid_t) !Self {
     const logger = Logger.init(.supervisor);
     var guest_procs = Procs.init(allocator);
     errdefer guest_procs.deinit();

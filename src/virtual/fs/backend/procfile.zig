@@ -13,8 +13,8 @@ pub const ProcFile = struct {
     pub const ProcTarget = union(enum) {
         self_pid,
         self_status,
-        pid: Proc.GuestPID,
-        pid_status: Proc.GuestPID,
+        pid: Proc.NsPid,
+        pid_status: Proc.NsPid,
     };
 
     pub fn parseProcPath(path: []const u8) !ProcTarget {
@@ -36,7 +36,7 @@ pub const ProcFile = struct {
         const slash_pos = std.mem.indexOfScalar(u8, remainder, '/');
         const pid_str = if (slash_pos) |pos| remainder[0..pos] else remainder;
 
-        const pid = std.fmt.parseInt(Proc.GuestPID, pid_str, 10) catch return error.InvalidPath;
+        const pid = std.fmt.parseInt(Proc.NsPid, pid_str, 10) catch return error.InvalidPath;
         if (pid <= 0) return error.InvalidPath;
 
         if (slash_pos) |pos| {
@@ -59,7 +59,7 @@ pub const ProcFile = struct {
 
         switch (target) {
             .self_pid => {
-                const guest_pid = caller.namespace.getGuestPID(caller) orelse return error.FileNotFound;
+                const guest_pid = caller.namespace.getNsPid(caller) orelse return error.FileNotFound;
                 self.content_len = formatPid(&self.content, guest_pid);
             },
             .self_status => {
@@ -79,22 +79,24 @@ pub const ProcFile = struct {
         return self;
     }
 
-    fn formatPid(buf: *[256]u8, pid: Proc.GuestPID) usize {
+    fn formatPid(buf: *[256]u8, pid: Proc.NsPid) usize {
         const slice = std.fmt.bufPrint(buf, "{d}\n", .{pid}) catch unreachable;
         return slice.len;
     }
 
     fn formatStatus(buf: *[256]u8, target: *Proc) usize {
-        const guest_pid = target.namespace.getGuestPID(target) orelse 0;
+        const guest_pid = target.namespace.getNsPid(target) orelse 0;
 
         // PPid: if target has a parent visible in the same namespace, use its guest PID. Otherwise 0.
-        const ppid: Proc.GuestPID = if (target.parent) |parent|
-            target.namespace.getGuestPID(parent) orelse 0
+        const ppid: Proc.NsPid = if (target.parent) |parent|
+            target.namespace.getNsPid(parent) orelse 0
         else
             0;
 
         // TODO: support more status content lookup, this isn't 100% compatible
-        const slice = std.fmt.bufPrint(buf, "Name:\tsandbox\nPid:\t{d}\nPPid:\t{d}\n", .{ guest_pid, ppid }) catch unreachable;
+        // We also use the same name for everything
+        const name = "bvisor-guest";
+        const slice = std.fmt.bufPrint(buf, "Name:\t{s}\nPid:\t{d}\nPPid:\t{d}\n", .{ name, guest_pid, ppid }) catch unreachable;
         return slice.len;
     }
 
@@ -201,7 +203,7 @@ test "open /proc/self/status contains Pid and PPid" {
     // Child's guest PID is 200, parent is 100
     try testing.expect(std.mem.indexOf(u8, content, "Pid:\t200\n") != null);
     try testing.expect(std.mem.indexOf(u8, content, "PPid:\t100\n") != null);
-    try testing.expect(std.mem.indexOf(u8, content, "Name:\tsandbox\n") != null);
+    try testing.expect(std.mem.indexOf(u8, content, "Name:\tbvisor-guest\n") != null);
 }
 
 test "open /proc/<N> returns pid for visible process" {
@@ -241,7 +243,7 @@ test "open /proc/<N>/status for visible process" {
     const root = v_procs.lookup.get(100).?;
 
     // Create child in new namespace
-    const nspids = [_]Proc.GuestPID{ 200, 1 };
+    const nspids = [_]Proc.NsPid{ 200, 1 };
     try proc_info.testing.setupNsPids(allocator, 200, &nspids);
     _ = try v_procs.registerChild(root, 200, Procs.CloneFlags.from(std.os.linux.CLONE.NEWPID));
     const child = v_procs.lookup.get(200).?;
