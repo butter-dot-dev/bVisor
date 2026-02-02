@@ -23,6 +23,10 @@ logger: Logger,
 // All pros track their own virtual namespaces and file descriptors
 guest_procs: Procs,
 
+// Mutex protecting the entirety of Supervisor's internal state, (Procs/Proc/Namespace/FdTable)
+// This is the simplest, dumbest implementation, will optimize over time.
+mutex: std.Thread.Mutex = .{},
+
 // Overlay root for sandbox filesystem isolation (COW + private /tmp)
 overlay: OverlayRoot,
 
@@ -87,7 +91,6 @@ pub fn run(self: *Self) !void {
 /// Main notification loop. Reads syscall notifications from the kernel and responds
 /// Multiple workers may run at a single time
 fn worker(self: *Self, worker_id: u32) !void {
-    // Supervisor handles syscalls in a single blocking thread. 80/20 solution for now, will rethink once we benchmark
     self.logger.log("Worker {d} starting", .{worker_id});
     while (true) {
         // Receive syscall notification from kernel

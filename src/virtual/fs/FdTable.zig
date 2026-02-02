@@ -8,12 +8,14 @@ const posix = std.posix;
 /// We manage all fd allocation, so these start at 3 (after stdin/stdout/stderr).
 pub const VirtualFD = i32;
 
+const AtomicUsize = std.atomic.Value(usize);
+
 const Self = @This();
 
 /// FdTable is a refcounted file descriptor table.
 /// When CLONE_FILES is set, parent and child share the same table (refd).
 /// When CLONE_FILES is not set, child gets a clone (copy with fresh refcount).
-ref_count: usize,
+ref_count: AtomicUsize = undefined,
 allocator: Allocator,
 open_files: std.AutoHashMapUnmanaged(VirtualFD, File),
 next_vfd: VirtualFD = 3, // start after stdin/stdout/stderr
@@ -21,7 +23,7 @@ next_vfd: VirtualFD = 3, // start after stdin/stdout/stderr
 pub fn init(allocator: Allocator) !*Self {
     const self = try allocator.create(Self);
     self.* = .{
-        .ref_count = 1,
+        .ref_count = AtomicUsize.init(1),
         .allocator = allocator,
         .open_files = .empty,
     };
@@ -29,13 +31,15 @@ pub fn init(allocator: Allocator) !*Self {
 }
 
 pub fn ref(self: *Self) *Self {
-    self.ref_count += 1;
+    const prev = self.ref_count.fetchAdd(1, .monotonic);
+    _ = prev;
     return self;
 }
 
 pub fn unref(self: *Self) void {
-    self.ref_count -= 1;
-    if (self.ref_count == 0) {
+    const prev = self.ref_count.fetchSub(1, .acq_rel);
+    if (prev == 1) {
+        // .acq_rel required to ensure full memory syncronization before deinit
         self.open_files.deinit(self.allocator);
         self.allocator.destroy(self);
     }
@@ -58,7 +62,7 @@ pub fn clone(self: *Self, allocator: Allocator) !*Self {
     }
 
     new.* = .{
-        .ref_count = 1,
+        .ref_count = AtomicUsize.init(1),
         .allocator = allocator,
         .open_files = new_open_files,
         .next_vfd = self.next_vfd,
@@ -210,10 +214,10 @@ test "unref from refcount=2 keeps table alive" {
     const table = try Self.init(testing.allocator);
 
     const shared = table.ref();
-    try testing.expectEqual(@as(usize, 2), table.ref_count);
+    try testing.expectEqual(@as(usize, 2), table.ref_count.raw);
 
     shared.unref();
-    try testing.expectEqual(@as(usize, 1), table.ref_count);
+    try testing.expectEqual(@as(usize, 1), table.ref_count.raw);
 
     // Table should still be usable
     const file = File{ .passthrough = .{ .fd = 100 } };

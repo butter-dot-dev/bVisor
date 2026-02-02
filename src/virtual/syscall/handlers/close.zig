@@ -1,6 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
 const Proc = @import("../../proc/Proc.zig");
+const File = @import("../../fs/file.zig").File;
 const Supervisor = @import("../../../Supervisor.zig");
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
 const replyErr = @import("../../../seccomp/notif.zig").replyErr;
@@ -19,22 +20,29 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         return replyContinue(notif.id);
     }
 
-    const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
-        logger.log("close: process not found for pid={d}: {}", .{ caller_pid, err });
-        return replyErr(notif.id, .SRCH);
-    };
+    // Copy the File value before removing — fd_table.get() returns a pointer into the
+    // hash map's internal storage, which becomes dangling after remove().
+    var file: File = undefined;
+    {
+        supervisor.mutex.lock();
+        defer supervisor.mutex.unlock();
 
-    // Look up the file in the fd table
-    const file = caller.fd_table.get(fd) orelse {
-        logger.log("close: EBADF for fd={d}", .{fd});
-        return replyErr(notif.id, .BADF);
-    };
+        const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
+            logger.log("close: process not found for pid={d}: {}", .{ caller_pid, err });
+            return replyErr(notif.id, .SRCH);
+        };
 
-    // Close the file
+        const file_ptr = caller.fd_table.get(fd) orelse {
+            logger.log("close: EBADF for fd={d}", .{fd});
+            return replyErr(notif.id, .BADF);
+        };
+
+        file = file_ptr.*;
+        _ = caller.fd_table.remove(fd);
+    }
+
+    // File close happens outside the lock since already removed from fd_table
     file.close();
-
-    // Remove from fd table
-    _ = caller.fd_table.remove(fd);
 
     logger.log("close: closed fd={d}", .{fd});
     return replySuccess(notif.id, 0);
@@ -48,7 +56,6 @@ const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
 const isError = @import("../../../seccomp/notif.zig").isError;
 const isContinue = @import("../../../seccomp/notif.zig").isContinue;
-const File = @import("../../fs/file.zig").File;
 const ProcFile = @import("../../fs/backend/procfile.zig").ProcFile;
 
 test "close virtual FD returns success and removes from table" {

@@ -7,6 +7,9 @@ const replyContinue = @import("../../../seccomp/notif.zig").replyContinue;
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
     const caller_pid: Proc.AbsPid = @intCast(notif.pid);
 
+    supervisor.mutex.lock();
+    defer supervisor.mutex.unlock();
+
     // Clean up virtual proc entry before kernel handles the exit
     // Ignore errors - process may have already been cleaned up
     supervisor.guest_procs.handleProcessExit(caller_pid) catch {};

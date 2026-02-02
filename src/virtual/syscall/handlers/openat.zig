@@ -19,13 +19,15 @@ const memory_bridge = deps.memory_bridge;
 
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
     const logger = supervisor.logger;
-
     const caller_pid: Proc.AbsPid = @intCast(notif.pid);
 
-    const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
-        logger.log("openat: process not found for pid={d}: {}", .{ caller_pid, err });
-        return replyErr(notif.id, .SRCH);
-    };
+    // supervisor.mutex.lock();
+    // defer supervisor.mutex.unlock();
+
+    // const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
+    //     logger.log("openat: process not found for pid={d}: {}", .{ caller_pid, err });
+    //     return replyErr(notif.id, .SRCH);
+    // };
 
     // Read path from caller's memory
     const path_ptr: u64 = notif.data.arg1;
@@ -63,6 +65,9 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
             // Special case: if we're in the /proc filepath
             // We need to sync guest_procs with the kernel to ensure all current PIDs are registered
             if (backend == .proc) {
+                supervisor.mutex.lock();
+                defer supervisor.mutex.unlock();
+
                 supervisor.guest_procs.syncNewProcs() catch |err| {
                     logger.log("openat: syncNewProcs failed: {}", .{err});
                     return replyErr(notif.id, .NOSYS);
@@ -70,6 +75,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
             }
 
             // Open the file via the appropriate backend
+            // Note all are lock-free (independent of internal supervisor state) except for proc
             const file: File = switch (backend) {
                 .passthrough => .{ .passthrough = Passthrough.open(&supervisor.overlay, path, flags, mode) catch |err| {
                     logger.log("openat: failed to open {s}: {s}", .{ path, @errorName(err) });
@@ -83,10 +89,37 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
                     logger.log("openat: failed to open {s}: {s}", .{ path, @errorName(err) });
                     return replyErr(notif.id, .IO);
                 } },
-                .proc => .{ .proc = ProcFile.open(caller, path) catch |err| {
-                    logger.log("openat: failed to open {s}: {s}", .{ path, @errorName(err) });
-                    return replyErr(notif.id, if (err == error.FileNotFound) .NOENT else .IO);
-                } },
+                .proc => .{
+                    .proc = blk: {
+                        // Special case: the open of ProcFile requires passing in the caller
+                        // So we need a critical section since get does lazy registration
+                        supervisor.mutex.lock();
+                        defer supervisor.mutex.unlock();
+
+                        const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
+                            logger.log("openat: process not found for pid={d}: {}", .{ caller_pid, err });
+                            return replyErr(notif.id, .SRCH);
+                        };
+                        break :blk ProcFile.open(caller, path) catch |err| {
+                            logger.log("openat: failed to open {s}: {s}", .{ path, @errorName(err) });
+                            return replyErr(notif.id, if (err == error.FileNotFound) .NOENT else .IO);
+                        };
+                    },
+                },
+            };
+
+            // Enter critical section for all backends
+            // Registering newly opened file to caller's fd_table
+
+            // note there's subtle complexity here for the .proc case
+            // since we're re-acquiring the lock and a new instance of a caller *Proc
+
+            supervisor.mutex.lock();
+            defer supervisor.mutex.unlock();
+
+            const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
+                logger.log("openat: process not found for pid={d}: {}", .{ caller_pid, err });
+                return replyErr(notif.id, .SRCH);
             };
 
             // Insert into fd table and return the virtual fd
@@ -94,7 +127,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
                 logger.log("openat: failed to insert fd", .{});
                 return replyErr(notif.id, .MFILE);
             };
-
             logger.log("openat: opened {s} as vfd={d}", .{ path, vfd });
             return replySuccess(notif.id, @intCast(vfd));
         },

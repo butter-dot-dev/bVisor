@@ -32,16 +32,25 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         return replyContinue(notif.id);
     }
 
-    const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
-        logger.log("read: process not found for pid={d}: {}", .{ caller_pid, err });
-        return replyErr(notif.id, .SRCH);
-    };
+    // Critical section: File lookup
+    // TODO: known race condition, file may get deinitialized by other caller before we read from it.
+    // No sane guest process should do this, so we accept the null crash.
+    // TODO: consider ref counting Files
+    var file: *File = undefined;
+    {
+        supervisor.mutex.lock();
+        defer supervisor.mutex.unlock();
 
-    // Look up the virtual FD
-    const file = caller.fd_table.get(fd) orelse {
-        logger.log("read: EBADF for fd={d}", .{fd});
-        return replyErr(notif.id, .BADF);
-    };
+        const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
+            logger.log("read: process not found for pid={d}: {}", .{ caller_pid, err });
+            return replyErr(notif.id, .SRCH);
+        };
+
+        file = caller.fd_table.get(fd) orelse {
+            logger.log("read: EBADF for fd={d}", .{fd});
+            return replyErr(notif.id, .BADF);
+        };
+    }
 
     // Perform read into supervisor-local buf
     // It's ok to only partially resolve count if count is larger than we're willing to stack allocate

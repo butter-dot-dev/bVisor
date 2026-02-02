@@ -30,16 +30,25 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         return replyContinue(notif.id);
     }
 
-    const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
-        logger.log("writev: process not found for pid={d}: {}", .{ caller_pid, err });
-        return replyErr(notif.id, .SRCH);
-    };
+    // Critical section: File lookup
+    // TODO: known race condition, file may get deinitialized by other caller before we write to it.
+    // No sane guest process should do this, so we accept the null crash.
+    // TODO: consider ref counting Files
+    var file: *File = undefined;
+    {
+        supervisor.mutex.lock();
+        defer supervisor.mutex.unlock();
 
-    // Look up the file object
-    const file = caller.fd_table.get(fd) orelse {
-        logger.log("writev: EBADF for fd={d}", .{fd});
-        return replyErr(notif.id, .BADF);
-    };
+        const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
+            logger.log("writev: process not found for pid={d}: {}", .{ caller_pid, err });
+            return replyErr(notif.id, .SRCH);
+        };
+
+        file = caller.fd_table.get(fd) orelse {
+            logger.log("writev: EBADF for fd={d}", .{fd});
+            return replyErr(notif.id, .BADF);
+        };
+    }
 
     // Read iovec array from child memory
     var iovecs: [MAX_IOV]posix.iovec_const = undefined;
