@@ -21,14 +21,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     const logger = supervisor.logger;
     const caller_pid: Proc.AbsPid = @intCast(notif.pid);
 
-    // supervisor.mutex.lock();
-    // defer supervisor.mutex.unlock();
-
-    // const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
-    //     logger.log("openat: process not found for pid={d}: {}", .{ caller_pid, err });
-    //     return replyErr(notif.id, .SRCH);
-    // };
-
     // Read path from caller's memory
     const path_ptr: u64 = notif.data.arg1;
     var path_buf: [256]u8 = undefined;

@@ -70,27 +70,33 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn run(self: *Self) !void {
-    // Spawn three worker threads.
-    var future_1 = self.io.async(Self.worker, .{ self, 1 });
-    defer _ = future_1.cancel(self.io) catch {};
-    var future_2 = self.io.async(Self.worker, .{ self, 2 });
-    defer _ = future_2.cancel(self.io) catch {};
-    var future_3 = self.io.async(Self.worker, .{ self, 3 });
-    defer _ = future_3.cancel(self.io) catch {};
+    const max_workers = 8;
+    const num_workers = @min(std.Thread.getCpuCount() catch 1, max_workers);
 
-    // Wait for any one to exit
-    switch (try self.io.select(.{
-        .future_1 = &future_1,
-        .future_2 = &future_2,
-        .future_3 = &future_3,
-    })) {
-        else => {},
+    // To build an array of futures, must get the exact type of the worker function's return value
+    const WorkerReturn = @typeInfo(@TypeOf(Self.worker)).@"fn".return_type.?;
+    const WorkerFuture = Io.Future(WorkerReturn);
+    var futures: [max_workers]WorkerFuture = undefined;
+
+    // Spawn workers
+    for (0..num_workers) |i| {
+        futures[i] = self.io.async(Self.worker, .{ self, i });
+    }
+
+    // Cancel workers on exit
+    defer for (futures[0..num_workers]) |*f| {
+        _ = f.cancel(self.io) catch {};
+    };
+
+    // Wait for any worker to exit
+    for (futures[0..num_workers]) |*f| {
+        try f.await(self.io);
     }
 }
 
 /// Main notification loop. Reads syscall notifications from the kernel and responds
 /// Multiple workers may run at a single time
-fn worker(self: *Self, worker_id: u32) !void {
+fn worker(self: *Self, worker_id: usize) !void {
     self.logger.log("Worker {d} starting", .{worker_id});
     while (true) {
         // Receive syscall notification from kernel
