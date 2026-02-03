@@ -103,21 +103,24 @@ pub fn get(self: *Self, tid: AbsTid) !*Thread {
     return error.ThreadNotRegistered;
 }
 
-/// Get Thread from an NsTid via a reference Thread's Namespace
+/// Get Thread from an NsTgid via a reference Thread's Namespace
 ///
-/// This is a hotpath for any NsTid, targeting syscalls like kill and waitpid.
+/// This is a hotpath for any NsTgid, targeting syscalls like kill and waitpid.
 /// So, syncs with kernel only happen if initial lookup fails.
+/// Found Thread must be the group leader satisfying TID == nstgid
 pub fn getNamespaced(
     self: *Self,
     ref_thread: *Thread,
-    nstid: NsTid,
+    nstgid: NsTgid,
 ) !*Thread {
     // Initial lookup
-    if (ref_thread.namespace.threads.get(nstid)) |thread| return thread;
+    if (ref_thread.namespace.threads.get(nstgid)) |thread| return thread;
 
     // Initial lookup failed, try lazy register
     try self.syncNewThreads();
-    if (ref_thread.namespace.threads.get(nstid)) |thread| return thread;
+
+    // Followup lookup
+    if (ref_thread.namespace.threads.get(nstgid)) |thread| return thread;
 
     // Still not found, give up
     return error.ThreadNotRegistered;

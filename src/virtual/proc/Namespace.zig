@@ -56,7 +56,7 @@ pub fn registerThread(self: *Self, allocator: Allocator, thread: *Thread) !void 
     var nstid_buf: [128]NsTid = undefined;
 
     // Read of tid and tgid from the Thread
-    const tgid = thread.thread_group.tgid;
+    const tgid = thread.get_tgid();
     const tid = thread.tid;
 
     // Read NSpid (NsTid) chains from kernel
@@ -129,7 +129,7 @@ pub fn getAbsTgid(self: *Self, thread: *Thread) ?AbsTgid {
     var iterator = self.threads.iterator();
     while (iterator.next()) |entry| {
         const val = entry.value_ptr;
-        if (val.* == thread) return val.*.thread_group.tgid;
+        if (val.* == thread) return val.*.get_tgid();
     }
     return null;
 }

@@ -3,22 +3,24 @@ const linux = std.os.linux;
 const Supervisor = @import("../../../Supervisor.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
+const NsTid = Thread.NsTid;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
 const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 
-/// gettid returns the thread ID. For the main thread (which bVisor supports),
-/// this equals the process ID.
-// TODO: differentiate from main pid
+/// gettid returns the TID of a thread.
+/// For the thread group leader, this equals its TID.
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
-    const caller_pid: AbsTid = @intCast(notif.pid);
+    const caller_tid: AbsTid = @intCast(notif.pid);
 
-    const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
-        std.log.err("gettid: process not found for pid={d}: {}", .{ caller_pid, err });
+    const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
+        std.log.err("gettid: Thread not found with tid={d}: {}", .{ caller_tid, err });
         return replyErr(notif.id, .SRCH);
     };
 
-    const ns_tid = caller.namespace.getNsPid(caller) orelse std.debug.panic("gettid: supervisor invariant violated - proc's namespace doesn't contain itself", .{});
+    // should hold that the resulting caller's TID : AbsTid matches the original caller_tid : AbsTid
+    if (caller.tid != caller_tid) unreachable;
 
-    // For main thread, tid == pid
+    const ns_tid = caller.namespace.getNsTid(caller) orelse std.debug.panic("gettid: Supervisor invariant violated - Thread's Namespace doesn't contain the Thread itself", .{});
+
     return replySuccess(notif.id, @intCast(ns_tid));
 }

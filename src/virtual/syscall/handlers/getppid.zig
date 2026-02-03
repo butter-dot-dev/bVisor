@@ -29,7 +29,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     if (!caller.canSee(parent)) return replySuccess(notif.id, 0);
 
     // Caller can see parent, but we need to remap to AbsTgid
-    const abs_ptgid = caller.namespace.getAbsTgid(parent) orelse std.debug.panic("getppid: Supervisor invariant violated - Thread's Namespace doesn't contain itself", .{});
+    const abs_ptgid = caller.namespace.getAbsTgid(parent) orelse std.debug.panic("getppid: Supervisor invariant violated - Thread's Namespace doesn't contain the Thread itself", .{});
 
     return replySuccess(notif.id, @intCast(abs_ptgid));
 }

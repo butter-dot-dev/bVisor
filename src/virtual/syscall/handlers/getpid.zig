@@ -21,7 +21,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         return replyErr(notif.id, .SRCH);
     };
 
-    const ns_tgid = caller.namespace.getAbsTgid(caller) orelse std.debug.panic("getpid: Supervisor invariant violated - Thread's Namespace doesn't contain itself", .{});
+    const ns_tgid = caller.namespace.getAbsTgid(caller) orelse std.debug.panic("getpid: Supervisor invariant violated - Thread's Namespace doesn't the Thread itself", .{});
 
     return replySuccess(notif.id, @intCast(ns_tgid));
 }
