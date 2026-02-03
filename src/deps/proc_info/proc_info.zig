@@ -5,14 +5,12 @@ const impl = if (builtin.is_test)
 else
     @import("impl/linux.zig");
 
-const Proc = @import("../../virtual/proc/Proc.zig");
-pub const AbsPid = Proc.AbsPid;
-pub const NsPid = Proc.NsPid;
-pub const CloneFlags = @import("../../virtual/proc/Procs.zig").CloneFlags;
-
+// TODO: tidy this up, and add implementations to testing.zig
 pub const detectCloneFlags = impl.detectCloneFlags;
-pub const readNsPids = impl.readNsPids;
+pub const readNsTids = impl.readNsTids;
+// pub const readNsIds = impl.readNsIds;
 pub const getStatus = impl.getStatus;
-pub const listPids = impl.listPids;
+pub const listTids = impl.listTids;
+// pub const listTgids = impl.listTgids; // TODO: decide: used?
 
 pub const testing = if (builtin.is_test) impl else struct {};

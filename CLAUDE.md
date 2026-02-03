@@ -54,14 +54,15 @@ src/
       impl/testing.zig  # Testing: mock implementation
     proc_info/
       proc_info.zig       # Comptime selector for implementation
-      impl/linux.zig      # Production: Parent PID and clone flags detection
-      impl/testing.zig    # Testing: mock implementation
+      impl/linux.zig      # Production: TID/TGID info, clone flags detection via /proc
+      impl/testing.zig    # Testing: mock maps (mock_ptid_map, mock_clone_flags, mock_nstids, mock_nstgids)
 
   virtual/              # Virtualization layer
-    proc/               # Process virtualization
-      Procs.zig         # Manages all virtual processes, kernel→virtual PID mapping
-      Proc.zig          # Single process: pid, namespace, fd_table, parent/children
-      Namespace.zig     # PID namespace with refcounting, vpid allocation
+    proc/               # Thread/process virtualization
+      Threads.zig       # Manages all threads, kernel TID → Thread mapping
+      Thread.zig        # Single thread: tid, thread_group, namespace, fd_table, parent/children
+      ThreadGroup.zig   # Thread group (process): tgid, threads map
+      Namespace.zig     # TID namespace with refcounting, NsTid allocation
     fs/                 # File descriptor virtualization
       FdTable.zig       # Per-process fd table, refcounted (shared on CLONE_FILES)
       OpenFile.zig            # Virtual FD union: kernel passthrough, proc files, COW files
@@ -75,12 +76,15 @@ src/
 
 **Syscall flow**: Child syscall → kernel USER_NOTIF → Supervisor.recv() → Notification.handle() → Syscall handler or passthrough → Supervisor.send()
 
-**Process virtualization**:
-- `Procs` tracks all sandboxed processes with kernel PID (from the perspective of the supervisor) → guest PID (from the perspective of the guest) mapping
-- Each `Proc` has its own `FdTable` and belongs to a `Namespace`
+**Thread virtualization** (follows Linux kernel model where threads are the basic unit):
+- `Threads` tracks all sandboxed threads with kernel TID → `Thread` mapping
+- ID types: `AbsTid`/`NsTid` (thread IDs), `AbsTgid`/`NsTgid` (thread group IDs, aka PIDs)
+- `Thread` has `.tid`, `.thread_group`, `.namespace`, `.fd_table`, `.parent`, `.children`
+- `ThreadGroup` represents a process (group of threads sharing address space)
+- For main thread (thread group leader): TID == TGID. For other threads: TID unique, TGID == leader's TID
 - `CLONE_FILES` shares fd_table (refcounted), otherwise cloned
-- `CLONE_NEWPID` creates new namespace, otherwise inherited
-- Killing a process kills its entire subtree (including nested namespaces)
+- `CLONE_NEWPID` creates new TID namespace, otherwise inherited
+- Killing a thread kills its entire subtree (including nested namespaces)
 
 **FD handling**: Uses virtual FD abstraction with `OpenFile` union enum:
 - `.kernel` - passthrough to real kernel FD (from the perspective of the supervisor)
@@ -113,7 +117,7 @@ else
 ```zig
 test {
     _ = @import("Supervisor.zig");
-    _ = @import("virtual/proc/Procs.zig");
+    _ = @import("virtual/proc/Threads.zig");
     _ = @import("virtual/fs/OpenFile.zig");
     _ = @import("virtual/fs/FdTable.zig");
     _ = @import("virtual/fs/Cow.zig");

@@ -1,22 +1,29 @@
 const std = @import("std");
 const linux = std.os.linux;
 const Allocator = std.mem.Allocator;
-const Proc = @import("Proc.zig");
-const NsPid = Proc.NsPid;
-const AbsPid = Proc.AbsPid;
-const proc_info = @import("../../deps/proc_info/proc_info.zig");
+const Thread = @import("Thread.zig");
 
-const ProcMap = std.AutoHashMapUnmanaged(NsPid, *Proc);
+const proc_info = @import("../../deps/proc_info/proc_info.zig");
+const readNsTids = proc_info.readNsTids;
+
+// Thread IDs
+pub const AbsTid = Thread.AbsTid;
+pub const NsTid = Thread.NsTid;
+// ThreadGroup IDs
+pub const AbsTgid = Thread.AbsTgid;
+pub const NsTgid = Thread.NsTgid;
+
+const ThreadMap = std.AutoHashMapUnmanaged(NsTid, *Thread);
 
 const Self = @This();
 
-/// Namespaces are refcounted and shared between procs.
-/// Used for visibility filtering - processes can only see other processes
-/// in the same namespace or descendent namespaces.
+/// Namespaces are refcounted and shared between Threads.
+/// Used for visibility filtering - Thread (Groups) can only see other Thread (Groups)
+/// in the same Namespace or descendent Namespace.
 ref_count: usize,
 allocator: Allocator,
 parent: ?*Self,
-procs: ProcMap = .empty,
+threads: ThreadMap = .empty,
 
 pub fn init(allocator: Allocator, parent: ?*Self) !*Self {
     const self = try allocator.create(Self);
@@ -38,18 +45,22 @@ pub fn unref(self: *Self) void {
     self.ref_count -= 1;
     if (self.ref_count == 0) {
         if (self.parent) |p| p.unref();
-        self.procs.deinit(self.allocator);
+        self.threads.deinit(self.allocator);
         self.allocator.destroy(self);
     }
 }
 
-/// Register a proc in this namespace and all ancestor namespaces.
-/// Reads NSpid from /proc/[pid]/status to get the NsPid for each namespace level.
-/// NSpid format: "NSpid: 15234  892  7  1" (outermost to innermost)
-pub fn registerProc(self: *Self, allocator: Allocator, proc: *Proc, abs_pid: AbsPid) !void {
-    // Read NSpid chain from kernel. Gives us PIDs from outermost to innermost namespace
-    var nspid_buf: [128]NsPid = undefined;
-    const nspids = try proc_info.readNsPids(abs_pid, &nspid_buf);
+/// Register a Thread in this Namespace and all ancestor Namespaces.
+pub fn registerThread(self: *Self, allocator: Allocator, thread: *Thread) !void {
+    // Prepare buffer for namespace TID chain
+    var nstid_buf: [128]NsTid = undefined;
+
+    // Read of tid and tgid from the Thread
+    const tgid = thread.thread_group.tgid;
+    const tid = thread.tid;
+
+    // Read NSpid (NsTid) chains from kernel
+    const nstids = try readNsTids(tgid, tid, &nstid_buf);
 
     // Count namespace depth (self + ancestors)
     var ns_depth: usize = 1;
@@ -58,21 +69,21 @@ pub fn registerProc(self: *Self, allocator: Allocator, proc: *Proc, abs_pid: Abs
         ns_depth += 1;
     }
 
-    // NSpid length should match namespace depth
-    if (nspids.len != ns_depth) {
+    // TID length should match namespace depth
+    if (nstids.len != ns_depth) {
         return error.NamespaceDepthMismatch;
     }
 
-    // Register in own namespace
-    try self.procs.put(allocator, nspids[nspids.len - 1], proc);
+    // Register in own Namespace
+    try self.threads.put(allocator, nstids[nstids.len - 1], thread);
 
-    // Register in all ancestor namespaces (walking backwards through nspids)
-    // Only enter loop if there are ancestors (nspids.len > 1)
-    if (nspids.len > 1) {
+    // Register in all ancestor Namespaces (walking backwards through nstids)
+    // Only enter loop if there are ancestors (nstids.len > 1)
+    if (nstids.len > 1) {
         var ancestor = self.parent;
-        var idx: usize = nspids.len - 2; // Start from second-to-last
+        var idx: usize = nstids.len - 2; // Start from second-to-last
         while (ancestor) |anc_ns| {
-            try anc_ns.procs.put(allocator, nspids[idx], proc);
+            try anc_ns.threads.put(allocator, nstids[idx], thread);
             ancestor = anc_ns.parent;
             if (idx == 0) break;
             idx -= 1;
@@ -80,35 +91,35 @@ pub fn registerProc(self: *Self, allocator: Allocator, proc: *Proc, abs_pid: Abs
     }
 }
 
-/// Unregister a proc from this namespace and all ancestor namespaces.
-pub fn unregisterProc(self: *Self, proc: *Proc) void {
+/// Unregister a Thread from this Namespace and all ancestor Namespaces.
+pub fn unregisterThread(self: *Self, thread: *Thread) void {
     // Find and remove from own namespace
-    if (self.getNsPid(proc)) |ns_pid| {
-        _ = self.procs.remove(ns_pid);
+    if (self.getNsTid(thread)) |ns_tid| {
+        _ = self.threads.remove(ns_tid);
     }
 
-    // Remove from all ancestor namespaces
+    // Remove from all ancestor Namespaces
     var ancestor = self.parent;
     while (ancestor) |ns| {
-        if (ns.getNsPid(proc)) |ns_pid| {
-            _ = ns.procs.remove(ns_pid);
+        if (ns.getNsTid(thread)) |ns_tid| {
+            _ = ns.threads.remove(ns_tid);
         }
         ancestor = ns.parent;
     }
 }
 
-/// Check if a proc is visible in this namespace.
-pub fn contains(self: *Self, proc: *Proc) bool {
-    return self.getNsPid(proc) != null;
+/// Check if a Thread is visible in this Namespace.
+pub fn contains(self: *Self, thread: *Thread) bool {
+    return self.getNsTid(thread) != null;
 }
 
-/// Reverse lookup in ProcMap for NsPid of a Proc
-pub fn getNsPid(self: *Self, proc: *Proc) ?NsPid {
-    var iterator = self.procs.iterator();
+/// Reverse lookup in ThreadMap for NsTid of a Thread
+pub fn getNsTid(self: *Self, thread: *Thread) ?NsTid {
+    var iterator = self.threads.iterator();
     while (iterator.next()) |entry| {
         const key = entry.key_ptr;
         const val = entry.value_ptr;
-        if (val.* == proc) return key.*;
+        if (val.* == thread) return key.*;
     }
     return null;
 }

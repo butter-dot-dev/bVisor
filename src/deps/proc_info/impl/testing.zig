@@ -1,93 +1,151 @@
 const std = @import("std");
+const linux = std.os.linux;
 const Allocator = std.mem.Allocator;
 
-const Proc = @import("../../../virtual/proc/Proc.zig");
-pub const AbsPid = Proc.AbsPid;
-pub const NsPid = Proc.NsPid;
-pub const ProcStatus = @import("../../..//virtual/proc/ProcStatus.zig");
-pub const CloneFlags = @import("../../../virtual/proc/Procs.zig").CloneFlags;
+const Thread = @import("../../../virtual/proc/Thread.zig");
+// Thread IDs
+pub const AbsTid = Thread.AbsTid;
+pub const NsTid = Thread.NsTid;
+// ThreadGroup IDs
+pub const AbsTgid = Thread.AbsTgid;
+pub const NsTgid = Thread.NsTgid;
 
-/// Max depth of namespace hierarchy for mock NsPids
-const MAX_NS_DEPTH = 128;
+const Threads = @import("../../../virtual/proc/Threads.zig");
+pub const CloneFlags = Threads.CloneFlags;
+const ThreadStatus = @import("../../../virtual/proc/ThreadStatus.zig");
+const MAX_NS_DEPTH = ThreadStatus.MAX_NS_DEPTH;
 
-/// Mock parent PID map: child_pid -> parent_pid
-pub var mock_ppid_map: std.AutoHashMapUnmanaged(AbsPid, AbsPid) = .empty;
+/// Mock parent TID map: child_tid -> parent_tid
+pub var mock_ptid_map: std.AutoHashMapUnmanaged(AbsTid, AbsTid) = .empty;
 
-/// Mock clone flags map: child_pid -> CloneFlags
-pub var mock_clone_flags: std.AutoHashMapUnmanaged(AbsPid, CloneFlags) = .empty;
+/// Mock clone flags map: child_tid -> CloneFlags
+pub var mock_clone_flags: std.AutoHashMapUnmanaged(AbsTid, CloneFlags) = .empty;
 
-/// Mock NSpid map: AbsPid -> array of NsPids (outermost to innermost)
-pub var mock_nspids: std.AutoHashMapUnmanaged(AbsPid, []const NsPid) = .empty;
+/// Mock NSpid map: AbsTid -> array of NsTids (outermost to innermost)
+pub var mock_nstids: std.AutoHashMapUnmanaged(AbsTid, []const NsTid) = .empty;
+
+/// Mock NStgid map: AbsTid -> array of NsTgids (outermost to innermost)
+pub var mock_nstgids: std.AutoHashMapUnmanaged(AbsTid, []const NsTgid) = .empty;
 
 /// Return mock clone flags for a child
-pub fn detectCloneFlags(parent_pid: AbsPid, child_pid: AbsPid) CloneFlags {
-    _ = parent_pid;
-    return mock_clone_flags.get(child_pid) orelse CloneFlags{};
+pub fn detectCloneFlags(parent_tid: AbsTid, child_tid: AbsTid) CloneFlags {
+    _ = parent_tid;
+    return mock_clone_flags.get(child_tid) orelse CloneFlags{};
 }
 
 /// Read NSpid chain from mock map.
-/// If not explicitly configured, returns [pid] as a single-element array,
-/// which is correct for a process in a single (root) namespace.
-pub fn readNsPids(pid: AbsPid, buf: []NsPid) ![]NsPid {
-    if (mock_nspids.get(pid)) |nspids| {
-        if (nspids.len > buf.len) return error.BufferTooSmall;
-        @memcpy(buf[0..nspids.len], nspids);
-        return buf[0..nspids.len];
+/// If not explicitly configured, returns [tid] as a single-element array,
+/// which is correct for a thread in a single (root) namespace.
+/// The tgid parameter is ignored in testing (we key by tid only).
+pub fn readNsTids(tgid: AbsTgid, tid: AbsTid, nstid_buf: []NsTid) ![]NsTid {
+    _ = tgid;
+    if (mock_nstids.get(tid)) |nstids| {
+        if (nstids.len > nstid_buf.len) return error.BufferTooSmall;
+        @memcpy(nstid_buf[0..nstids.len], nstids);
+        return nstid_buf[0..nstids.len];
     }
-    // Default: single namespace, NsPid = AbsPid
-    if (buf.len < 1) return error.BufferTooSmall;
-    buf[0] = pid;
-    return buf[0..1];
+    // Default: single namespace, NsTid = AbsTid
+    if (nstid_buf.len < 1) return error.BufferTooSmall;
+    nstid_buf[0] = tid;
+    return nstid_buf[0..1];
 }
 
-pub fn getStatus(pid: AbsPid) !ProcStatus {
+/// Mock TGID map: tid -> tgid (for threads that aren't group leaders)
+pub var mock_tgid_map: std.AutoHashMapUnmanaged(AbsTid, AbsTgid) = .empty;
 
-    // Read parent PID from mock map
-    const ppid = mock_ppid_map.get(pid) orelse return error.ProcNotInKernel;
+/// Get the status of a Thread from mock maps.
+/// TGID is looked up from mock_tgid_map, or defaults to tid (thread is leader).
+pub fn getStatus(tid: AbsTid) !ThreadStatus {
+    // Read parent TID from mock map
+    const ptid = mock_ptid_map.get(tid) orelse return error.ThreadNotInKernel;
 
-    var status = ProcStatus{ .pid = pid, .ppid = ppid };
-    const nspids = mock_nspids.get(pid) orelse &[_]NsPid{pid};
-    @memcpy(status.nspids_buf[0..nspids.len], nspids);
-    status.nspids_len = nspids.len;
+    // Get TGID from mock, or default to tid (thread group leader)
+    const tgid = mock_tgid_map.get(tid) orelse tid;
+
+    var status = ThreadStatus{
+        .tid = tid,
+        .tgid = tgid,
+        .ptid = ptid,
+    };
+
+    // Populate NsTgids from mock or default to [tgid]
+    if (mock_nstgids.get(tid)) |nstgids| {
+        if (nstgids.len > MAX_NS_DEPTH) return error.BufferTooSmall;
+        @memcpy(status.nstgids_buf[0..nstgids.len], nstgids);
+        status.nstgids_len = nstgids.len;
+    } else {
+        status.nstgids_buf[0] = tgid;
+        status.nstgids_len = 1;
+    }
+
+    // Populate NsTids from mock or default to [tid]
+    if (mock_nstids.get(tid)) |nstids| {
+        if (nstids.len > MAX_NS_DEPTH) return error.BufferTooSmall;
+        @memcpy(status.nstids_buf[0..nstids.len], nstids);
+        status.nstids_len = nstids.len;
+    } else {
+        status.nstids_buf[0] = tid;
+        status.nstids_len = 1;
+    }
 
     return status;
 }
 
-/// Reset mock state - call in test cleanup
+/// List all TIDs from mock - returns keys from mock_ptid_map
+pub fn listTids(allocator: Allocator) ![]AbsTid {
+    var tids: std.ArrayListUnmanaged(AbsTid) = .empty;
+    errdefer tids.deinit(allocator);
+
+    var iter = mock_ptid_map.keyIterator();
+    while (iter.next()) |tid_ptr| {
+        try tids.append(allocator, tid_ptr.*);
+    }
+
+    return tids.toOwnedSlice(allocator);
+}
+
+// ============================================================================
+// Test Setup Functions
+// ============================================================================
+
+/// Reset all mock state - call in test cleanup
 pub fn reset(allocator: Allocator) void {
-    mock_ppid_map.deinit(allocator);
+    mock_ptid_map.deinit(allocator);
+    mock_tgid_map.deinit(allocator);
     mock_clone_flags.deinit(allocator);
-    mock_nspids.deinit(allocator);
-    mock_ppid_map = .empty;
+    mock_nstids.deinit(allocator);
+    mock_nstgids.deinit(allocator);
+    mock_ptid_map = .empty;
+    mock_tgid_map = .empty;
     mock_clone_flags = .empty;
-    mock_nspids = .empty;
+    mock_nstids = .empty;
+    mock_nstgids = .empty;
 }
 
 /// Setup a parent relationship in the mock
-pub fn setupParent(allocator: Allocator, child: AbsPid, parent: AbsPid) !void {
-    try mock_ppid_map.put(allocator, child, parent);
+pub fn setupParent(allocator: Allocator, child_tid: AbsTid, parent_tid: AbsTid) !void {
+    try mock_ptid_map.put(allocator, child_tid, parent_tid);
 }
 
 /// Setup clone flags for a child in the mock
-pub fn setupCloneFlags(allocator: Allocator, child: AbsPid, flags: CloneFlags) !void {
-    try mock_clone_flags.put(allocator, child, flags);
+pub fn setupCloneFlags(allocator: Allocator, child_tid: AbsTid, flags: CloneFlags) !void {
+    try mock_clone_flags.put(allocator, child_tid, flags);
 }
 
-/// Setup NSpid chain for a process in the mock.
-/// nspids should be ordered from outermost (root) to innermost (process's own namespace).
-pub fn setupNsPids(allocator: Allocator, pid: AbsPid, nspids: []const NsPid) !void {
-    try mock_nspids.put(allocator, pid, nspids);
+/// Setup NSpid chain for a thread in the mock.
+/// nstids should be ordered from outermost (root) to innermost (thread's own namespace).
+pub fn setupNsTids(allocator: Allocator, tid: AbsTid, nstids: []const NsTid) !void {
+    try mock_nstids.put(allocator, tid, nstids);
 }
 
-/// List all PIDs from mock - returns keys from mock_ppid_map
-pub fn listPids(allocator: Allocator) ![]AbsPid {
-    var pids: std.ArrayListUnmanaged(AbsPid) = .empty;
-    errdefer pids.deinit(allocator);
+/// Setup NStgid chain for a thread in the mock.
+/// nstgids should be ordered from outermost (root) to innermost (thread's own namespace).
+pub fn setupNsTgids(allocator: Allocator, tid: AbsTid, nstgids: []const NsTgid) !void {
+    try mock_nstgids.put(allocator, tid, nstgids);
+}
 
-    var iter = mock_ppid_map.keyIterator();
-    while (iter.next()) |pid_ptr| {
-        try pids.append(allocator, pid_ptr.*);
-    }
-
-    return pids.toOwnedSlice(allocator);
+/// Setup TGID for a thread that is not the group leader.
+/// If not set, getStatus() defaults to tid == tgid (thread is leader).
+pub fn setupTgid(allocator: Allocator, tid: AbsTid, tgid: AbsTgid) !void {
+    try mock_tgid_map.put(allocator, tid, tgid);
 }
