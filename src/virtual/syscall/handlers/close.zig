@@ -1,6 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
-const Proc = @import("../../proc/Proc.zig");
+const Thread = @import("../../proc/Thread.zig");
+pub const AbsTid = Thread.AbsTid;
 const Supervisor = @import("../../../Supervisor.zig");
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
 const replyErr = @import("../../../seccomp/notif.zig").replyErr;
@@ -10,7 +11,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     const logger = supervisor.logger;
 
     // Parse args
-    const caller_pid: Proc.AbsPid = @intCast(notif.pid);
+    const caller_tid: AbsTid = @intCast(notif.pid);
     const fd: i32 = @bitCast(@as(u32, @truncate(notif.data.arg0)));
 
     // Passthrough stdin/stdout/stderr
@@ -19,21 +20,21 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         return replyContinue(notif.id);
     }
 
-    const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
-        logger.log("close: process not found for pid={d}: {}", .{ caller_pid, err });
+    const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
+        logger.log("close: Task not found for tid={d}: {}", .{ caller_tid, err });
         return replyErr(notif.id, .SRCH);
     };
 
-    // Look up the file in the fd table
+    // Look up the File in the FdTable
     const file = caller.fd_table.get(fd) orelse {
         logger.log("close: EBADF for fd={d}", .{fd});
         return replyErr(notif.id, .BADF);
     };
 
-    // Close the file
+    // Close the File
     file.close();
 
-    // Remove from fd table
+    // Remove from FdTable
     _ = caller.fd_table.remove(fd);
 
     logger.log("close: closed fd={d}", .{fd});
@@ -53,16 +54,16 @@ const ProcFile = @import("../../fs/backend/procfile.zig").ProcFile;
 
 test "close virtual FD returns success and removes from table" {
     const allocator = testing.allocator;
-    const init_pid: Proc.AbsPid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_pid);
+    const init_tid: AbsTid = 100;
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
     defer supervisor.deinit();
 
-    const caller = supervisor.guest_procs.lookup.get(init_pid).?;
+    const caller = supervisor.guest_procs.lookup.get(init_tid).?;
     const proc_file = try ProcFile.open(caller, "/proc/self");
     const vfd = try caller.fd_table.insert(File{ .proc = proc_file });
 
     const notif = makeNotif(.close, .{
-        .pid = init_pid,
+        .pid = init_tid,
         .arg0 = @as(u64, @bitCast(@as(i64, vfd))),
     });
 
@@ -76,17 +77,17 @@ test "close virtual FD returns success and removes from table" {
 
 test "after close, read same VFD returns EBADF" {
     const allocator = testing.allocator;
-    const init_pid: Proc.AbsPid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_pid);
+    const init_tid: AbsTid = 100;
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
     defer supervisor.deinit();
 
-    const caller = supervisor.guest_procs.lookup.get(init_pid).?;
+    const caller = supervisor.guest_procs.lookup.get(init_tid).?;
     const proc_file = try ProcFile.open(caller, "/proc/self");
     const vfd = try caller.fd_table.insert(File{ .proc = proc_file });
 
     // Close it
     const close_notif = makeNotif(.close, .{
-        .pid = init_pid,
+        .pid = init_tid,
         .arg0 = @as(u64, @bitCast(@as(i64, vfd))),
     });
     _ = handle(close_notif, &supervisor);
@@ -95,7 +96,7 @@ test "after close, read same VFD returns EBADF" {
     const read_handler = @import("read.zig");
     var result_buf: [64]u8 = undefined;
     const read_notif = makeNotif(.read, .{
-        .pid = init_pid,
+        .pid = init_tid,
         .arg0 = @as(u64, @bitCast(@as(i64, vfd))),
         .arg1 = @intFromPtr(&result_buf),
         .arg2 = result_buf.len,
@@ -108,44 +109,44 @@ test "after close, read same VFD returns EBADF" {
 
 test "close FD 0 (stdin) returns replyContinue" {
     const allocator = testing.allocator;
-    const init_pid: Proc.AbsPid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_pid);
+    const init_tid: AbsTid = 100;
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
     defer supervisor.deinit();
 
-    const notif = makeNotif(.close, .{ .pid = init_pid, .arg0 = 0 });
+    const notif = makeNotif(.close, .{ .pid = init_tid, .arg0 = 0 });
     const resp = handle(notif, &supervisor);
     try testing.expect(isContinue(resp));
 }
 
 test "close FD 1 (stdout) returns replyContinue" {
     const allocator = testing.allocator;
-    const init_pid: Proc.AbsPid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_pid);
+    const init_tid: AbsTid = 100;
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
     defer supervisor.deinit();
 
-    const notif = makeNotif(.close, .{ .pid = init_pid, .arg0 = 1 });
+    const notif = makeNotif(.close, .{ .pid = init_tid, .arg0 = 1 });
     const resp = handle(notif, &supervisor);
     try testing.expect(isContinue(resp));
 }
 
 test "close FD 2 (stderr) returns replyContinue" {
     const allocator = testing.allocator;
-    const init_pid: Proc.AbsPid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_pid);
+    const init_tid: AbsTid = 100;
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
     defer supervisor.deinit();
 
-    const notif = makeNotif(.close, .{ .pid = init_pid, .arg0 = 2 });
+    const notif = makeNotif(.close, .{ .pid = init_tid, .arg0 = 2 });
     const resp = handle(notif, &supervisor);
     try testing.expect(isContinue(resp));
 }
 
 test "close non-existent VFD returns EBADF" {
     const allocator = testing.allocator;
-    const init_pid: Proc.AbsPid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_pid);
+    const init_tid: AbsTid = 100;
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
     defer supervisor.deinit();
 
-    const notif = makeNotif(.close, .{ .pid = init_pid, .arg0 = 99 });
+    const notif = makeNotif(.close, .{ .pid = init_tid, .arg0 = 99 });
     const resp = handle(notif, &supervisor);
     try testing.expect(isError(resp));
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
@@ -153,16 +154,16 @@ test "close non-existent VFD returns EBADF" {
 
 test "double close - first succeeds, second EBADF" {
     const allocator = testing.allocator;
-    const init_pid: Proc.AbsPid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_pid);
+    const init_tid: AbsTid = 100;
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
     defer supervisor.deinit();
 
-    const caller = supervisor.guest_procs.lookup.get(init_pid).?;
+    const caller = supervisor.guest_procs.lookup.get(init_tid).?;
     const proc_file = try ProcFile.open(caller, "/proc/self");
     const vfd = try caller.fd_table.insert(File{ .proc = proc_file });
 
     const notif = makeNotif(.close, .{
-        .pid = init_pid,
+        .pid = init_tid,
         .arg0 = @as(u64, @bitCast(@as(i64, vfd))),
     });
 
@@ -178,8 +179,8 @@ test "double close - first succeeds, second EBADF" {
 
 test "close with unknown caller PID returns ESRCH" {
     const allocator = testing.allocator;
-    const init_pid: Proc.AbsPid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_pid);
+    const init_tid: AbsTid = 100;
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
     defer supervisor.deinit();
 
     const notif = makeNotif(.close, .{ .pid = 999, .arg0 = 3 });

@@ -1,10 +1,11 @@
 const std = @import("std");
 const linux = std.os.linux;
 const Supervisor = @import("../../../Supervisor.zig");
-const Proc = @import("../../proc/Proc.zig");
-const AbsPid = Proc.AbsPid;
-const NsPid = Proc.NsPid;
-const Procs = @import("../../proc/Procs.zig");
+const Thread = @import("../../proc/Thread.zig");
+const AbsTid = Thread.AbsTid;
+const AbsTgid = Thread.AbsTgid;
+const Threads = @import("../../proc/Threads.zig");
+const CloneFlags = Threads.CloneFlags;
 const proc_info = @import("../../../deps/deps.zig").proc_info;
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
@@ -13,68 +14,68 @@ const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 const isError = @import("../../../seccomp/notif.zig").isError;
 
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
-    const caller_pid: AbsPid = @intCast(notif.pid);
+    const caller_tid: AbsTid = @intCast(notif.pid);
 
-    const caller = supervisor.guest_procs.get(caller_pid) catch |err| {
-        std.log.err("getpid: process not found for pid={d}: {}", .{ caller_pid, err });
+    const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
+        std.log.err("getpid: Thread not found with tid={d}: {}", .{ caller_tid, err });
         return replyErr(notif.id, .SRCH);
     };
 
-    const ns_pid = caller.namespace.getNsPid(caller) orelse std.debug.panic("getpid: supervisor invariant violated - proc's namespace doesn't contain itself", .{});
+    const ns_tgid = caller.namespace.getAbsTgid(caller) orelse std.debug.panic("getpid: Supervisor invariant violated - Thread's Namespace doesn't contain itself", .{});
 
-    return replySuccess(notif.id, @intCast(ns_pid));
+    return replySuccess(notif.id, @intCast(ns_tgid));
 }
 
-test "getpid returns init process NsPid" {
+test "getpid returns init Thread's AbsTgid" {
     const allocator = testing.allocator;
-    const init_pid: AbsPid = 12345;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_pid);
+    const init_tid: AbsTid = 12345;
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
     defer supervisor.deinit();
 
-    const notif = makeNotif(.getpid, .{ .pid = init_pid });
+    const notif = makeNotif(.getpid, .{ .pid = init_tid });
     const resp = handle(notif, &supervisor);
-    try testing.expectEqual(init_pid, resp.val);
+    try testing.expectEqual(init_tid, resp.val);
 }
 
-test "getpid for child process returns its NsPid" {
+test "getpid for child Thread returns its AbsTgid" {
     const allocator = testing.allocator;
     // Add an initial guest
-    const init_guest_pid: AbsPid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_guest_pid);
+    const init_guest_tid: AbsTid = 100;
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_guest_tid);
     defer supervisor.deinit();
 
     // Add a child to the initial guest
-    const child_pid: AbsPid = 200;
-    const init_proc = supervisor.guest_procs.lookup.get(init_guest_pid).?;
-    _ = try supervisor.guest_procs.registerChild(init_proc, child_pid, Procs.CloneFlags.from(0));
+    const child_tid: AbsTid = 200;
+    const init_thread = supervisor.guest_threads.lookup.get(init_guest_tid).?;
+    _ = try supervisor.guest_threads.registerChild(init_thread, child_tid, CloneFlags.from(0));
 
     // Child calls getpid
-    //   ... supposing converted child's requested pid to be :AbsPid
-    const notif = makeNotif(.getpid, .{ .pid = child_pid });
+    //   ... supposing converted child's requested pid to be :AbsTid
+    const notif = makeNotif(.getpid, .{ .pid = child_tid });
     const resp = handle(notif, &supervisor);
-    try testing.expectEqual(child_pid, resp.val);
+    try testing.expectEqual(child_tid, resp.val);
 }
 
-test "getpid from immediate child in new namespace returns namespace-local PID" {
+test "getpid from immediate child in new Namespace returns absolute TGID (deprecated?)" {
     const allocator = testing.allocator;
-    const init_pid: AbsPid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_pid);
+    const init_tid: AbsTid = 100;
+    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
     defer supervisor.deinit();
     defer proc_info.testing.reset(allocator);
 
-    // Child in new namespace (depth 2, PID 1 in its own namespace)
-    const child_pid: AbsPid = 9999;
-    const nspids = [_]NsPid{ 9999, 1 };
-    try proc_info.testing.setupNsPids(allocator, child_pid, &nspids);
+    // Child in new Namespace (depth 2, PID 1 in its own Namespace)
+    const child_tid: AbsTid = 9999;
+    const abstgids = [_]AbsTgid{ 9999, 1 };
+    try proc_info.testing.setupAbsTgids(allocator, child_tid, &abstgids);
 
-    const parent = supervisor.guest_procs.lookup.get(init_pid).?;
-    _ = try supervisor.guest_procs.registerChild(parent, child_pid, Procs.CloneFlags.from(linux.CLONE.NEWPID));
+    const parent = supervisor.guest_threads.lookup.get(init_tid).?;
+    _ = try supervisor.guest_threads.registerChild(parent, child_tid, CloneFlags.from(linux.CLONE.NEWPID));
 
     // Child calls getpid
-    const notif = makeNotif(.getpid, .{ .pid = child_pid });
+    const notif = makeNotif(.getpid, .{ .pid = child_tid });
     const resp = handle(notif, &supervisor);
     try testing.expect(!isError(resp));
     try testing.expectEqual(1, resp.val);
-    // Child's NsPid should (almost certainly) not match the AbsPid for that child process (e.g., 1)
-    try testing.expect(child_pid != resp.val);
+    // Child's AbsTgid should (almost certainly) not match the AbsTid for that child Thread (e.g., 1)
+    try testing.expect(child_tid != resp.val);
 }

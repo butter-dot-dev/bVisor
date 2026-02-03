@@ -124,6 +124,16 @@ pub fn getNsTid(self: *Self, thread: *Thread) ?NsTid {
     return null;
 }
 
+/// Reverse lookup in ThreadMap for AbsTgid of a Thread
+pub fn getAbsTgid(self: *Self, thread: *Thread) ?AbsTgid {
+    var iterator = self.threads.iterator();
+    while (iterator.next()) |entry| {
+        const val = entry.value_ptr;
+        if (val.* == thread) return val.*.thread_group.tgid;
+    }
+    return null;
+}
+
 const testing = std.testing;
 
 test "Namespace refcount - ref increases count" {

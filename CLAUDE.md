@@ -81,7 +81,7 @@ src/
 - ID types: `AbsTid`/`NsTid` (thread IDs), `AbsTgid`/`NsTgid` (thread group IDs, aka PIDs)
 - `Thread` has `.tid`, `.thread_group`, `.namespace`, `.fd_table`, `.parent`, `.children`
 - `ThreadGroup` represents a process (group of threads sharing address space)
-- For main thread (thread group leader): TID == TGID. For other threads: TID unique, TGID == leader's TID
+- For the thread group leader: TID == TGID. For other threads: TID is unique, while TGID == leader's TID
 - `CLONE_FILES` shares fd_table (refcounted), otherwise cloned
 - `CLONE_NEWPID` creates new TID namespace, otherwise inherited
 - Killing a thread kills its entire subtree (including nested namespaces)

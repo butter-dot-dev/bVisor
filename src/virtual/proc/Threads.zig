@@ -176,14 +176,14 @@ pub fn syncNewThreads(self: *Self) !void {
     }
 
     // TODO?: processes that no longer exist in the kernel should be deleted
-    // Would involve calling handleProcessExit() on whichever TIDs have disappeared
+    // Would involve calling handleThreadExit() on whichever TIDs have disappeared
 }
 
 /// Register the initial sandbox root Thread
 ///
 /// This creates new a ThreadGroup, Namespace, and FdTable, too
-pub fn handleInitialProcess(self: *Self, tid: AbsTid) !void {
-    if (self.lookup.count() != 0) return error.InitialProcessExists;
+pub fn handleInitialThread(self: *Self, tid: AbsTid) !void {
+    if (self.lookup.count() != 0) return error.InitialThreadExists;
 
     // Passing null thread_group/namespace/fd_table creates new ones
     const root_thread = try Thread.init(
@@ -229,7 +229,7 @@ pub fn registerChild(
     return child;
 }
 
-pub fn handleProcessExit(self: *Self, tid: AbsTid) !void {
+pub fn handleThreadExit(self: *Self, tid: AbsTid) !void {
     const target_thread = self.lookup.get(tid) orelse return;
 
     // remove target from parent's children
@@ -258,7 +258,7 @@ test "state is correct after initial thread" {
     try std.testing.expect(v_threads.lookup.count() == 0);
 
     const init_tid = 22;
-    try v_threads.handleInitialProcess(init_tid);
+    try v_threads.handleInitialThread(init_tid);
     try std.testing.expectEqual(1, v_threads.lookup.count());
     const thread = v_threads.lookup.get(init_tid).?;
     try std.testing.expectEqual(init_tid, thread.tid);
@@ -280,7 +280,7 @@ test "basic tree operations work - add, kill" {
     //   - d
 
     const a_tid = 33;
-    try v_threads.handleInitialProcess(a_tid);
+    try v_threads.handleInitialThread(a_tid);
     try std.testing.expectEqual(1, v_threads.lookup.count());
 
     const b_tid = 44;
@@ -310,7 +310,7 @@ test "basic tree operations work - add, kill" {
     // a
     // - c
     //   - d
-    try v_threads.handleProcessExit(b_tid);
+    try v_threads.handleThreadExit(b_tid);
     try std.testing.expectEqual(3, v_threads.lookup.count());
     try std.testing.expectEqual(1, v_threads.lookup.get(a_tid).?.children.count());
     try std.testing.expectEqual(1, v_threads.lookup.get(c_tid).?.children.count());
@@ -327,7 +327,7 @@ test "basic tree operations work - add, kill" {
     try std.testing.expectEqual(4, v_threads.lookup.get(a_tid).?.namespace.threads.count());
 
     // clear whole tree
-    try v_threads.handleProcessExit(a_tid);
+    try v_threads.handleThreadExit(a_tid);
     try std.testing.expectEqual(0, v_threads.lookup.count());
     try std.testing.expectEqual(null, v_threads.lookup.get(a_tid));
     try std.testing.expectEqual(null, v_threads.lookup.get(b_tid));
@@ -336,20 +336,20 @@ test "basic tree operations work - add, kill" {
     try std.testing.expectEqual(null, v_threads.lookup.get(d_tid));
 }
 
-test "handle_initial_process fails if already registered" {
+test "handle_initial_thread fails if already registered" {
     var v_threads = Self.init(std.testing.allocator);
     defer v_threads.deinit();
 
-    try v_threads.handleInitialProcess(100);
-    try std.testing.expectError(error.InitialProcessExists, v_threads.handleInitialProcess(200));
+    try v_threads.handleInitialThread(100);
+    try std.testing.expectError(error.InitialThreadExists, v_threads.handleInitialThread(200));
 }
 
-test "handle_process_exit on non-existent tid is no-op" {
+test "handle_thread_exit on non-existent tid is no-op" {
     var v_threads = Self.init(std.testing.allocator);
     defer v_threads.deinit();
 
-    try v_threads.handleInitialProcess(100);
-    try v_threads.handleProcessExit(999);
+    try v_threads.handleInitialThread(100);
+    try v_threads.handleThreadExit(999);
     try std.testing.expectEqual(1, v_threads.lookup.count());
 }
 
@@ -362,7 +362,7 @@ test "kill intermediate node removes subtree but preserves siblings" {
     // - c
     //   - d
     const a_tid = 10;
-    try v_threads.handleInitialProcess(a_tid);
+    try v_threads.handleInitialThread(a_tid);
     const a_thread = v_threads.lookup.get(a_tid).?;
 
     const b_tid = 20;
@@ -376,7 +376,7 @@ test "kill intermediate node removes subtree but preserves siblings" {
     try std.testing.expectEqual(4, v_threads.lookup.count());
 
     // kill c (intermediate) - should also remove d but preserve a and b
-    try v_threads.handleProcessExit(c_tid);
+    try v_threads.handleThreadExit(c_tid);
 
     try std.testing.expectEqual(2, v_threads.lookup.count());
     try std.testing.expect(v_threads.lookup.get(a_tid) != null);
@@ -389,7 +389,7 @@ test "namespace visibility on single node" {
     var v_threads = Self.init(std.testing.allocator);
     defer v_threads.deinit();
 
-    try v_threads.handleInitialProcess(100);
+    try v_threads.handleInitialThread(100);
     const thread = v_threads.lookup.get(100).?;
 
     try std.testing.expectEqual(1, thread.namespace.threads.count());
@@ -404,7 +404,7 @@ test "deep nesting" {
     // chain: a -> b -> c -> d -> e
     var tids = [_]AbsTid{ 10, 20, 30, 40, 50 };
 
-    try v_threads.handleInitialProcess(tids[0]);
+    try v_threads.handleInitialThread(tids[0]);
     for (1..5) |i| {
         const parent = v_threads.lookup.get(tids[i - 1]).?;
         _ = try v_threads.registerChild(parent, tids[i], CloneFlags.from(0));
@@ -413,7 +413,7 @@ test "deep nesting" {
     try std.testing.expectEqual(5, v_threads.lookup.count());
 
     // kill middle (c) - should remove c, d, e
-    try v_threads.handleProcessExit(tids[2]);
+    try v_threads.handleThreadExit(tids[2]);
     try std.testing.expectEqual(2, v_threads.lookup.count());
 }
 
@@ -423,7 +423,7 @@ test "wide tree with many siblings" {
     defer v_threads.deinit();
 
     const parent_tid = 100;
-    try v_threads.handleInitialProcess(parent_tid);
+    try v_threads.handleInitialThread(parent_tid);
     const parent = v_threads.lookup.get(parent_tid).?;
 
     // add 10 children
@@ -447,7 +447,7 @@ test "nested namespace - visibility rules" {
     //           ns2: B -> C
 
     const a_tid = 100;
-    try v_threads.handleInitialProcess(a_tid);
+    try v_threads.handleInitialThread(a_tid);
     const a_thread = v_threads.lookup.get(a_tid).?;
 
     // B: child of A but root of new namespace (CLONE_NEWPID)
@@ -497,7 +497,7 @@ test "nested namespace - killing parent kills nested namespace" {
 
     // ns1: A -> B(ns2 root) -> C
     const a_tid = 100;
-    try v_threads.handleInitialProcess(a_tid);
+    try v_threads.handleInitialThread(a_tid);
     const a_thread = v_threads.lookup.get(a_tid).?;
 
     // B: namespace root, TID 1 in its namespace
@@ -516,7 +516,7 @@ test "nested namespace - killing parent kills nested namespace" {
     try std.testing.expectEqual(3, v_threads.lookup.count());
 
     // Kill B - should also kill C (entire subtree, crossing namespace boundary)
-    try v_threads.handleProcessExit(b_tid);
+    try v_threads.handleThreadExit(b_tid);
 
     try std.testing.expectEqual(1, v_threads.lookup.count());
     try std.testing.expect(v_threads.lookup.get(a_tid) != null);
@@ -532,7 +532,7 @@ test "nested namespace - killing grandparent kills all" {
 
     // ns1: A -> B (ns2 root) -> C -> D (ns3 root) -> E
     const a_tid = 100;
-    try v_threads.handleInitialProcess(a_tid);
+    try v_threads.handleInitialThread(a_tid);
     const a_thread = v_threads.lookup.get(a_tid).?;
 
     // B: ns2 root, depth 2
@@ -565,7 +565,7 @@ test "nested namespace - killing grandparent kills all" {
     try std.testing.expectEqual(5, v_threads.lookup.count());
 
     // Kill A - should kill everything
-    try v_threads.handleProcessExit(a_tid);
+    try v_threads.handleThreadExit(a_tid);
     try std.testing.expectEqual(0, v_threads.lookup.count());
 }
 
@@ -575,7 +575,7 @@ test "tid is stored correctly" {
     defer v_threads.deinit();
 
     const a_tid = 12345;
-    try v_threads.handleInitialProcess(a_tid);
+    try v_threads.handleInitialThread(a_tid);
     const a_thread = v_threads.lookup.get(a_tid).?;
     try std.testing.expectEqual(a_tid, a_thread.tid);
 
@@ -590,7 +590,7 @@ test "can_see - same namespace" {
     var v_threads = Self.init(allocator);
     defer v_threads.deinit();
 
-    try v_threads.handleInitialProcess(100);
+    try v_threads.handleInitialThread(100);
     const a = v_threads.lookup.get(100).?;
     _ = try v_threads.registerChild(a, 200, CloneFlags.from(0));
     const b = v_threads.lookup.get(200).?;
@@ -605,7 +605,7 @@ test "can_see - child namespace cannot see parent-only threads" {
     defer v_threads.deinit();
     defer proc_info.testing.reset(allocator);
 
-    try v_threads.handleInitialProcess(100);
+    try v_threads.handleInitialThread(100);
     const a = v_threads.lookup.get(100).?;
 
     // B is in new namespace (depth 2)
@@ -635,7 +635,7 @@ test "deep namespace hierarchy (10 levels)" {
 
     // Root thread (depth 1)
     tids[0] = 1000;
-    try v_threads.handleInitialProcess(tids[0]);
+    try v_threads.handleInitialThread(tids[0]);
     threads[0] = v_threads.lookup.get(tids[0]).?;
 
     // Create nested namespaces
@@ -681,7 +681,7 @@ test "deep namespace hierarchy (10 levels)" {
     }
 
     // Kill middle of chain (ns4) - should kill ns4 through ns9
-    try v_threads.handleProcessExit(tids[4]);
+    try v_threads.handleThreadExit(tids[4]);
 
     // Only ns0-ns3 remain
     try std.testing.expectEqual(4, v_threads.lookup.count());
@@ -703,7 +703,7 @@ test "wide tree with many threads per namespace" {
 
     // Root thread
     const root_tid: AbsTid = 1;
-    try v_threads.handleInitialProcess(root_tid);
+    try v_threads.handleInitialThread(root_tid);
     const root = v_threads.lookup.get(root_tid).?;
 
     var total_threads: usize = 1; // root
@@ -737,7 +737,7 @@ test "wide tree with many threads per namespace" {
     try std.testing.expectEqual(expected_total, root.namespace.threads.count());
 
     // Kill one level1 thread, which should kill it and its 20 children
-    try v_threads.handleProcessExit(level1_threads[5].tid);
+    try v_threads.handleThreadExit(level1_threads[5].tid);
     try std.testing.expectEqual(expected_total - 1 - CHILDREN_PER_LEVEL, v_threads.lookup.count());
 }
 
@@ -757,7 +757,7 @@ test "mixed namespaces: some shared, some isolated" {
     //                                  ns3: B1a(211)
 
     // Root namespace
-    try v_threads.handleInitialProcess(1);
+    try v_threads.handleInitialThread(1);
     const root = v_threads.lookup.get(1).?;
 
     // A, B, C in root namespace
@@ -833,14 +833,14 @@ test "mixed namespaces: some shared, some isolated" {
     try std.testing.expect(thread_c.canSee(thread_a1));
 
     // Kill A, which should kill A, A1, A2 (entire subtree), showing 9 - 3 = 6
-    try v_threads.handleProcessExit(10);
+    try v_threads.handleThreadExit(10);
     try std.testing.expectEqual(6, v_threads.lookup.count());
     try std.testing.expect(v_threads.lookup.get(10) == null);
     try std.testing.expect(v_threads.lookup.get(11) == null);
     try std.testing.expect(v_threads.lookup.get(12) == null);
 
     // Kill B1, which should kill B1, B2, B1a, giving 6 - 3 = 3
-    try v_threads.handleProcessExit(21);
+    try v_threads.handleThreadExit(21);
     try std.testing.expectEqual(3, v_threads.lookup.count());
 
     // Only root, B, C should remain
@@ -860,7 +860,7 @@ test "stress: verify NsTid mapping correctness across namespaces" {
     //   - From root namespace: NsTid = 200
     //   - From child's own namespace: NsTid = 1
 
-    try v_threads.handleInitialProcess(100);
+    try v_threads.handleInitialThread(100);
     const root = v_threads.lookup.get(100).?;
 
     const child_nstids = [_]NsTid{ 200, 1 };
@@ -921,7 +921,7 @@ test "ensureRegistered registers thread and ancestors" {
     defer proc_info.testing.reset(allocator);
 
     // Register initial thread 100
-    try v_threads.handleInitialProcess(100);
+    try v_threads.handleInitialThread(100);
     try std.testing.expectEqual(1, v_threads.lookup.count());
 
     // Build a status_map with chain: 300 -> 200 -> 100
@@ -960,7 +960,7 @@ test "ensureRegistered is idempotent for already registered thread" {
     defer proc_info.testing.reset(allocator);
 
     // Register initial thread 100
-    try v_threads.handleInitialProcess(100);
+    try v_threads.handleInitialThread(100);
 
     var status_map = std.AutoHashMap(AbsTid, ThreadStatus).init(allocator);
     defer status_map.deinit();
@@ -975,7 +975,7 @@ test "ensureRegistered fails for thread not in status_map" {
     var v_threads = Self.init(allocator);
     defer v_threads.deinit();
 
-    try v_threads.handleInitialProcess(100);
+    try v_threads.handleInitialThread(100);
 
     var status_map = std.AutoHashMap(AbsTid, ThreadStatus).init(allocator);
     defer status_map.deinit();
