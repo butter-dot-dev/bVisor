@@ -70,8 +70,8 @@ Isolation is achieved via a copy-on-write overlay on top of the host filesystem.
 
 - [x] Path normalization (blocks `..` traversal attacks)
 - [x] `openat` with path-based allow/block rules
-- [ ] COW (copy-on-write) layer for write operations
-- [ ] Storage backend for COW (plans for /tmp, local, s3)
+- [x] COW (copy-on-write) layer for write operations
+- [x] Storage backend for COW (plans for /tmp, local, s3)
 - [ ] FD operations (`dup`, `lseek`, `fstat`, `fcntl`) - note: `read`, `write`, `close` are implemented
 - [ ] Directory operations (`getcwd`, `chdir`, `mkdirat`, `unlinkat`, `getdents64`)
 
