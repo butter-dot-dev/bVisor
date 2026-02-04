@@ -1,0 +1,22 @@
+{
+  "name": "bvisor",
+  "version": "0.0.1",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "predev": "cd ../../.. && zig build",
+    "dev": "docker run --rm -v .:/app -w /app oven/bun:alpine sh -c 'bun install && bun test.ts'"
+  },
+  "workspaces": [
+    "platforms/*"
+  ],
+  "optionalDependencies": {
+    "@bvisor/linux-arm64": "0.0.1",
+    "@bvisor/linux-x64": "0.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.0",
+    "typescript": "^5.0.0"
+  }
+}
