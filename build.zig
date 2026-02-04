@@ -12,12 +12,28 @@ pub fn build(b: *std.Build) void {
     });
     const host_target = b.graph.host;
 
+    // Build node bindings library
+    const node_api = b.dependency("node_api", .{});
+    const node_lib = b.addLibrary(.{
+        .name = "node_bindings",
+        .linkage = .dynamic,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/sdks/node/zig/module.zig"),
+            .target = host_target,
+            .optimize = optimize,
+        }),
+    });
+    node_lib.root_module.addIncludePath(node_api.path("include"));
+    node_lib.linker_allow_shlib_undefined = true;
+    const node_lib_install = b.addInstallArtifact(node_lib, .{ .dest_sub_path = "libbvisor.node" });
+    b.getInstallStep().dependOn(&node_lib_install.step);
+
     // Build and install linux executable
     // to ./zig-out/bin
     const linux_exe = b.addExecutable(.{
         .name = "bVisor",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
+            .root_source_file = b.path("src/core/main.zig"),
             .target = linux_target,
             .optimize = optimize,
         }),
@@ -27,7 +43,7 @@ pub fn build(b: *std.Build) void {
     // Build zig tests for running on host
     const host_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
+            .root_source_file = b.path("src/core/main.zig"),
             .target = host_target,
             .optimize = optimize,
         }),
@@ -36,7 +52,7 @@ pub fn build(b: *std.Build) void {
     // Build and install zig tests for running in linux container
     const linux_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
+            .root_source_file = b.path("src/core/main.zig"),
             .target = linux_target,
             .optimize = optimize,
         }),

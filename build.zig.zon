@@ -3,7 +3,12 @@
     .version = "0.0.0",
     .fingerprint = 0x5f97add257fd09eb,
     .minimum_zig_version = "0.16.0-dev.1859+212968c57",
-    .dependencies = .{},
+    .dependencies = .{
+        .node_api = .{
+            .url = "git+https://github.com/nodejs/node-api-headers?ref=#d41aa272949bb5e5ef477b87d2d565fd67a03f32",
+            .hash = "N-V-__8AAG-QAQAFFTumO7UyvrANtzv0ApXLnJ9Kskt5VmVQ",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
