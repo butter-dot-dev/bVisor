@@ -6,7 +6,7 @@
 src/sdks/node/
   index.ts              # Package entry point, re-exports Sandbox
   src/
-    libBvisor.ts        # FFI contract: libBvisorModule interface, platform check, require()
+    native.ts        # FFI contract: NativeModule interface, platform check, require()
     napi.ts             # External<T> phantom type for opaque native handles
     sandbox.ts          # Sandbox class, public API
   test.ts               # Smoke test, run via `npm run dev`
