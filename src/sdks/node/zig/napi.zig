@@ -72,20 +72,3 @@ pub fn External(comptime T: type) type {
         }
     };
 }
-
-pub fn registerFunction(
-    env: c.napi_env,
-    exports: c.napi_value,
-    comptime name: [:0]const u8,
-    func: *const fn (c.napi_env, c.napi_callback_info) callconv(.c) c.napi_value,
-) !void {
-    var napi_fn: c.napi_value = undefined;
-    if (c.napi_create_function(env, null, 0, func, null, &napi_fn) != c.napi_ok) {
-        throw(env, "Failed to create " ++ name);
-        return error.NapiError;
-    }
-    if (c.napi_set_named_property(env, exports, name, napi_fn) != c.napi_ok) {
-        throw(env, "Failed to export " ++ name);
-        return error.NapiError;
-    }
-}

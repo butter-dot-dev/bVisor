@@ -12,21 +12,43 @@ pub fn build(b: *std.Build) void {
     });
     const host_target = b.graph.host;
 
-    // Build node bindings library
+    // Build node bindings library for each platform
     const node_api = b.dependency("node_api", .{});
-    const node_lib = b.addLibrary(.{
-        .name = "node_bindings",
-        .linkage = .dynamic,
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/sdks/node/zig/module.zig"),
-            .target = host_target,
-            .optimize = optimize,
-        }),
-    });
-    node_lib.root_module.addIncludePath(node_api.path("include"));
-    node_lib.linker_allow_shlib_undefined = true;
-    const node_lib_install = b.addInstallArtifact(node_lib, .{ .dest_sub_path = "libbvisor.node" });
-    b.getInstallStep().dependOn(&node_lib_install.step);
+
+    const node_platforms = [_]struct {
+        cpu_arch: std.Target.Cpu.Arch,
+        dest_dir: []const u8,
+    }{
+        .{ .cpu_arch = .aarch64, .dest_dir = "../src/sdks/node/platforms/linux-arm64" },
+        .{ .cpu_arch = .x86_64, .dest_dir = "../src/sdks/node/platforms/linux-x64" },
+    };
+
+    for (node_platforms) |platform| {
+        const target = b.resolveTargetQuery(.{
+            .cpu_arch = platform.cpu_arch,
+            .os_tag = .linux,
+            .abi = .musl,
+        });
+
+        const node_lib = b.addLibrary(.{
+            .name = "libbvisor",
+            .linkage = .dynamic,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/sdks/node/zig/lib.zig"),
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+            }),
+        });
+        node_lib.root_module.addIncludePath(node_api.path("include"));
+        node_lib.linker_allow_shlib_undefined = true;
+
+        const install = b.addInstallArtifact(node_lib, .{
+            .dest_dir = .{ .override = .{ .custom = platform.dest_dir } },
+            .dest_sub_path = "libbvisor.node",
+        });
+        b.getInstallStep().dependOn(&install.step);
+    }
 
     // Build and install linux executable
     // to ./zig-out/bin

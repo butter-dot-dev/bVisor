@@ -1,4 +1,4 @@
-import { Sandbox } from "./src/sdks/node";
+import { Sandbox } from "./index";
 
 const sb = new Sandbox();
 console.log(sb.getValue()); // 0

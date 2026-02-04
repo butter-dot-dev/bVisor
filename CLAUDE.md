@@ -32,45 +32,54 @@ The build targets aarch64 Linux with musl ABI (for ARM64/Apple Silicon Docker). 
 
 ```
 src/
-  main.zig              # Entry point, demonstrates sandbox usage
-  setup.zig             # Fork into child/supervisor, seccomp BPF installation
-  supervisor.zig        # Main loop: recv notif → handle → send response
-  types.zig             # LinuxResult, Logger
-  smoke_test.zig        # TDD-style smoke test exercising sandbox syscall handling
+  core/                 # Zig sandbox runtime
+    main.zig            # Entry point, demonstrates sandbox usage
+    setup.zig           # Fork into child/supervisor, seccomp BPF installation
+    supervisor.zig      # Main loop: recv notif → handle → send response
+    types.zig           # LinuxResult, Logger
+    smoke_test.zig      # TDD-style smoke test exercising sandbox syscall handling
 
-  seccomp/
-    filter.zig          # BPF filter installation, returns notify FD
-    notif.zig           # Helper to construct test notifications
+    seccomp/
+      filter.zig        # BPF filter installation, returns notify FD
+      notif.zig         # Helper to construct test notifications
 
-  deps/                 # Comptime dependency injection for testability
-    deps.zig            # Re-exports pidfd, memory_bridge, proc_info
-    memory_bridge/
-      memory_bridge.zig # Comptime selector for implementation
-      impl/linux.zig    # Production: process_vm_readv/writev
-      impl/testing.zig  # Testing: local pointer access
-    pidfd/
-      pidfd.zig         # Comptime selector for implementation
-      impl/linux.zig    # Production: pidfd_open/pidfd_getfd
-      impl/testing.zig  # Testing: mock implementation
-    proc_info/
-      proc_info.zig       # Comptime selector for implementation
-      impl/linux.zig      # Production: Parent PID and clone flags detection
-      impl/testing.zig    # Testing: mock implementation
+    deps/               # Comptime dependency injection for testability
+      deps.zig          # Re-exports pidfd, memory_bridge, proc_info
+      memory_bridge/
+        memory_bridge.zig # Comptime selector for implementation
+        impl/linux.zig  # Production: process_vm_readv/writev
+        impl/testing.zig # Testing: local pointer access
+      pidfd/
+        pidfd.zig       # Comptime selector for implementation
+        impl/linux.zig  # Production: pidfd_open/pidfd_getfd
+        impl/testing.zig # Testing: mock implementation
+      proc_info/
+        proc_info.zig   # Comptime selector for implementation
+        impl/linux.zig  # Production: Parent PID and clone flags detection
+        impl/testing.zig # Testing: mock implementation
 
-  virtual/              # Virtualization layer
-    proc/               # Process virtualization
-      Procs.zig         # Manages all virtual processes, kernel→virtual PID mapping
-      Proc.zig          # Single process: pid, namespace, fd_table, parent/children
-      Namespace.zig     # PID namespace with refcounting, vpid allocation
-    fs/                 # File descriptor virtualization
-      FdTable.zig       # Per-process fd table, refcounted (shared on CLONE_FILES)
-      OpenFile.zig            # Virtual FD union: kernel passthrough, proc files, COW files
-    syscall/            # Syscall handlers
-      syscalls.zig      # Switch statement over syscalls, parsing notifications
-      handlers/
-        OpenAt.zig      # openat handler with path rules (block/allow/virtualize)
-        Writev.zig      # writev handler
-        ...             # handlers for other any other implemented syscalls
+    virtual/            # Virtualization layer
+      proc/             # Process virtualization
+        Procs.zig       # Manages all virtual processes, kernel→virtual PID mapping
+        Proc.zig        # Single process: pid, namespace, fd_table, parent/children
+        Namespace.zig   # PID namespace with refcounting, vpid allocation
+      fs/               # File descriptor virtualization
+        FdTable.zig     # Per-process fd table, refcounted (shared on CLONE_FILES)
+        OpenFile.zig    # Virtual FD union: kernel passthrough, proc files, COW files
+      syscall/          # Syscall handlers
+        syscalls.zig    # Switch statement over syscalls, parsing notifications
+        handlers/
+          OpenAt.zig    # openat handler with path rules (block/allow/virtualize)
+          Writev.zig    # writev handler
+          ...           # handlers for other any other implemented syscalls
+
+  sdks/
+    node/               # Node.js SDK (see src/sdks/node/CLAUDE.md)
+      index.ts          # Package entry point
+      src/sandbox.ts    # Sandbox class, platform-aware native loading
+      test.ts           # Smoke test (npm run dev)
+      zig/              # Zig N-API bindings source
+      platforms/        # Platform-specific npm packages with built .node binaries
 ```
 
 **Syscall flow**: Child syscall → kernel USER_NOTIF → Supervisor.recv() → Notification.handle() → Syscall handler or passthrough → Supervisor.send()
