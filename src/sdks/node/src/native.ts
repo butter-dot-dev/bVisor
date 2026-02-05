@@ -1,4 +1,5 @@
 import { arch, platform } from "os";
+import { familySync, MUSL } from "detect-libc";
 import { External } from "./napi";
 
 if (platform() !== "linux") {
@@ -18,4 +19,5 @@ export interface NativeModule {
   streamNext(stream: External<"Stream">): Uint8Array | null;
 }
 
-export const native: NativeModule = require(`@bvisor/linux-${arch()}`);
+const libc = familySync() === MUSL ? "musl" : "gnu";
+export const native: NativeModule = require(`@bvisor/linux-${arch()}-${libc}`);
