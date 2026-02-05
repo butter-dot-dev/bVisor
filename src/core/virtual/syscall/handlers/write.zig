@@ -127,7 +127,7 @@ test "write count=0 returns 0" {
     // Create a tmp file to write to
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
     const tmp_file = try Tmp.open(&supervisor.overlay, "/tmp/write_test_0", .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
-    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .tmp = tmp_file }));
+    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .tmp = tmp_file }), .{});
 
     var data: [0]u8 = undefined;
     const notif = makeNotif(.write, .{
@@ -188,7 +188,7 @@ test "write to read-only backend (proc) returns EIO" {
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
     const proc_file = try ProcFile.open(caller, "/proc/self");
-    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .proc = proc_file }));
+    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .proc = proc_file }), .{});
 
     var data = "test".*;
     const notif = makeNotif(.write, .{

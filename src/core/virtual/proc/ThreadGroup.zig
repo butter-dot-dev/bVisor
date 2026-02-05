@@ -15,7 +15,9 @@ const ThreadMap = std.AutoHashMapUnmanaged(AbsTid, *Thread);
 const Self = @This();
 
 /// ThreadGroups are refcounted and shared between Thread-s.
-ref_count: usize,
+const AtomicUsize = std.atomic.Value(usize);
+
+ref_count: AtomicUsize = undefined,
 allocator: Allocator,
 tgid: AbsTgid,
 parent: ?*Self,
@@ -24,7 +26,7 @@ threads: ThreadMap = .empty,
 pub fn init(allocator: Allocator, tgid: AbsTgid, parent: ?*Self) !*Self {
     const self = try allocator.create(Self);
     self.* = .{
-        .ref_count = 1,
+        .ref_count = AtomicUsize.init(1),
         .allocator = allocator,
         .tgid = tgid,
         .parent = if (parent) |p| p.ref() else null,
@@ -33,13 +35,14 @@ pub fn init(allocator: Allocator, tgid: AbsTgid, parent: ?*Self) !*Self {
 }
 
 pub fn ref(self: *Self) *Self {
-    self.ref_count += 1;
+    const prev = self.ref_count.fetchAdd(1, .monotonic);
+    _ = prev;
     return self;
 }
 
 pub fn unref(self: *Self) void {
-    self.ref_count -= 1;
-    if (self.ref_count == 0) {
+    const prev = self.ref_count.fetchSub(1, .acq_rel);
+    if (prev == 1) {
         if (self.parent) |p| p.unref();
         self.threads.deinit(self.allocator);
         self.allocator.destroy(self);

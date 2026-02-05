@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const linux = std.os.linux;
+const posix = std.posix;
 
 pub fn LinuxResult(comptime T: type) type {
     return union(enum) {
@@ -66,3 +67,24 @@ pub const Logger = struct {
         std.debug.print("{s}[{s}]{s}{s}\x1b[0m\n", .{ color, @tagName(self.name), padding, fmtlog });
     }
 };
+
+/// Convert linux.O flags to posix.O flags at the syscall boundary
+pub fn linuxToPosixFlags(linux_flags: linux.O) posix.O {
+    var flags: posix.O = .{};
+
+    flags.ACCMODE = switch (linux_flags.ACCMODE) {
+        .RDONLY => .RDONLY,
+        .WRONLY => .WRONLY,
+        .RDWR => .RDWR,
+    };
+
+    if (linux_flags.CREAT) flags.CREAT = true;
+    if (linux_flags.EXCL) flags.EXCL = true;
+    if (linux_flags.TRUNC) flags.TRUNC = true;
+    if (linux_flags.APPEND) flags.APPEND = true;
+    if (linux_flags.NONBLOCK) flags.NONBLOCK = true;
+    if (linux_flags.CLOEXEC) flags.CLOEXEC = true;
+    if (linux_flags.DIRECTORY) flags.DIRECTORY = true;
+
+    return flags;
+}

@@ -75,14 +75,7 @@ pub fn init(allocator: Allocator) Self {
 pub fn deinit(self: *Self) void {
     var iter = self.lookup.iterator();
     while (iter.next()) |entry| {
-        if (entry.value_ptr.*.parent == null) {
-            const subtree = entry.value_ptr.*.collectSubtreeOwned(self.allocator) catch break;
-            defer self.allocator.free(subtree);
-            for (subtree) |thread| {
-                thread.deinit(self.allocator);
-            }
-            break;
-        }
+        entry.value_ptr.*.deinit(self.allocator);
     }
     self.lookup.deinit(self.allocator);
 }
@@ -227,7 +220,7 @@ pub fn registerChild(
     errdefer fd_table.unref();
 
     const child = try parent.initChild(self.allocator, child_tid, namespace, fd_table);
-    errdefer parent.deinitChild(child, self.allocator);
+    errdefer child.deinit(self.allocator);
 
     try self.lookup.put(self.allocator, child_tid, child);
 
@@ -237,19 +230,37 @@ pub fn registerChild(
 pub fn handleThreadExit(self: *Self, tid: AbsTid) !void {
     const target_thread = self.lookup.get(tid) orelse return;
 
-    // remove target from parent's children
-    if (target_thread.parent) |parent| {
-        parent.removeChildLink(target_thread);
-    }
+    // If this is a namespace root, kill all Threads in the Namespace
+    if (target_thread.isNamespaceRoot()) {
+        // Collect all Thread-s in this Namespace to avoid iterator invalidation
+        var threads_to_remove: std.ArrayListUnmanaged(*Thread) = .empty;
+        defer threads_to_remove.deinit(self.allocator);
 
-    // collect all descendant Thread-s (crosses namespace boundaries)
-    const descendant_threads = try target_thread.collectSubtreeOwned(self.allocator);
-    defer self.allocator.free(descendant_threads);
+        var ns_iter = target_thread.namespace.threads.iterator();
+        while (ns_iter.next()) |entry| {
+            threads_to_remove.append(self.allocator, entry.value_ptr.*) catch break;
+        }
 
-    // remove from lookup table and deinit each Thread
-    for (descendant_threads) |thread| {
-        _ = self.lookup.remove(thread.tid);
-        thread.deinit(self.allocator);
+        // Remove and deinit each Thread
+        for (threads_to_remove.items) |thread| {
+            _ = self.lookup.remove(thread.tid);
+            thread.deinit(self.allocator);
+        }
+    } else {
+        // Not a namespace root: reparent and then remove the caller Thread
+        const new_parent = target_thread.parent;
+
+        // Since we don't store the immediate children of this caller Thread, have to iterate through all descendants to those needing reparenting
+        var iter = target_thread.namespace.threads.iterator();
+        while (iter.next()) |entry| {
+            const thread = entry.value_ptr.*;
+            if (thread.parent == target_thread) {
+                thread.parent = new_parent;
+            }
+        }
+
+        _ = self.lookup.remove(tid);
+        target_thread.deinit(self.allocator);
     }
 }
 
@@ -273,7 +284,6 @@ test "state is correct after initial thread" {
     const thread = v_threads.lookup.get(init_tid).?;
     try std.testing.expectEqual(init_tid, thread.tid);
     try std.testing.expectEqual(null, thread.parent);
-    try std.testing.expectEqual(0, thread.children.count());
     try std.testing.expect(thread.isNamespaceRoot());
 }
 
@@ -297,24 +307,15 @@ test "basic tree operations work - add, kill" {
     const a_thread = v_threads.lookup.get(a_tid).?;
     _ = try v_threads.registerChild(a_thread, b_tid, CloneFlags.from(0));
     try std.testing.expectEqual(2, v_threads.lookup.count());
-    try std.testing.expectEqual(1, v_threads.lookup.get(a_tid).?.children.count());
-    try std.testing.expectEqual(0, v_threads.lookup.get(b_tid).?.children.count());
 
     const c_tid = 55;
     _ = try v_threads.registerChild(a_thread, c_tid, CloneFlags.from(0));
     try std.testing.expectEqual(3, v_threads.lookup.count());
-    try std.testing.expectEqual(2, v_threads.lookup.get(a_tid).?.children.count());
-    try std.testing.expectEqual(0, v_threads.lookup.get(c_tid).?.children.count());
-    try std.testing.expectEqual(0, v_threads.lookup.get(b_tid).?.children.count());
 
     const d_tid = 66;
     const c_thread = v_threads.lookup.get(c_tid).?;
     _ = try v_threads.registerChild(c_thread, d_tid, CloneFlags.from(0));
     try std.testing.expectEqual(4, v_threads.lookup.count());
-    try std.testing.expectEqual(2, v_threads.lookup.get(a_tid).?.children.count());
-    try std.testing.expectEqual(1, v_threads.lookup.get(c_tid).?.children.count());
-    try std.testing.expectEqual(0, v_threads.lookup.get(b_tid).?.children.count());
-    try std.testing.expectEqual(0, v_threads.lookup.get(d_tid).?.children.count());
 
     // shrink to
     // a
@@ -322,9 +323,6 @@ test "basic tree operations work - add, kill" {
     //   - d
     try v_threads.handleThreadExit(b_tid);
     try std.testing.expectEqual(3, v_threads.lookup.count());
-    try std.testing.expectEqual(1, v_threads.lookup.get(a_tid).?.children.count());
-    try std.testing.expectEqual(1, v_threads.lookup.get(c_tid).?.children.count());
-    try std.testing.expectEqual(0, v_threads.lookup.get(d_tid).?.children.count());
     try std.testing.expectEqual(null, v_threads.lookup.get(b_tid));
 
     // verify namespace visibility via namespace.threads
@@ -385,14 +383,18 @@ test "kill intermediate node removes subtree but preserves siblings" {
 
     try std.testing.expectEqual(4, v_threads.lookup.count());
 
-    // kill c (intermediate) - should also remove d but preserve a and b
+    // kill c (intermediate)
+    // - removes c
+    // - reparents d to a (c's parent)
+    // - a and b remain unchanged
     try v_threads.handleThreadExit(c_tid);
 
-    try std.testing.expectEqual(2, v_threads.lookup.count());
+    try std.testing.expectEqual(3, v_threads.lookup.count());
     try std.testing.expect(v_threads.lookup.get(a_tid) != null);
     try std.testing.expect(v_threads.lookup.get(b_tid) != null);
     try std.testing.expectEqual(null, v_threads.lookup.get(c_tid));
-    try std.testing.expectEqual(null, v_threads.lookup.get(d_tid));
+    const d_thread = v_threads.lookup.get(d_tid).?;
+    try std.testing.expectEqual(a_thread, d_thread.parent.?);
 }
 
 test "namespace visibility on single node" {
@@ -422,9 +424,18 @@ test "deep nesting" {
 
     try std.testing.expectEqual(5, v_threads.lookup.count());
 
-    // kill middle (c) - should remove c, d, e
+    // kill middle (c) - only c is removed, d is reparented to b
     try v_threads.handleThreadExit(tids[2]);
-    try std.testing.expectEqual(2, v_threads.lookup.count());
+    try std.testing.expectEqual(4, v_threads.lookup.count());
+    try std.testing.expect(v_threads.lookup.get(tids[0]) != null); // a
+    try std.testing.expect(v_threads.lookup.get(tids[1]) != null); // b
+    try std.testing.expect(v_threads.lookup.get(tids[2]) == null); // c removed
+    try std.testing.expect(v_threads.lookup.get(tids[3]) != null); // d reparented
+    try std.testing.expect(v_threads.lookup.get(tids[4]) != null); // e
+    // d's parent should now be b
+    const d_thread = v_threads.lookup.get(tids[3]).?;
+    const b_thread = v_threads.lookup.get(tids[1]).?;
+    try std.testing.expectEqual(b_thread, d_thread.parent.?);
 }
 
 test "wide tree with many siblings" {
@@ -443,7 +454,7 @@ test "wide tree with many siblings" {
     }
 
     try std.testing.expectEqual(11, v_threads.lookup.count());
-    try std.testing.expectEqual(10, v_threads.lookup.get(parent_tid).?.children.count());
+    try std.testing.expectEqual(11, v_threads.lookup.get(parent_tid).?.namespace.threads.count());
 }
 
 test "nested namespace - visibility rules" {
@@ -746,9 +757,12 @@ test "wide tree with many threads per namespace" {
     // All in same namespace, so everyone should see everyone
     try std.testing.expectEqual(expected_total, root.namespace.threads.count());
 
-    // Kill one level1 thread, which should kill it and its 20 children
+    // Kill one level1 thread (not namespace root) - only that thread is removed
+    // Its 20 children get reparented to root
     try v_threads.handleThreadExit(level1_threads[5].tid);
-    try std.testing.expectEqual(expected_total - 1 - CHILDREN_PER_LEVEL, v_threads.lookup.count());
+    try std.testing.expectEqual(expected_total - 1, v_threads.lookup.count());
+    // Verify one of the reparented children has root as parent
+    try std.testing.expectEqual(root, level2_threads[5][0].parent.?);
 }
 
 test "mixed namespaces: some shared, some isolated" {
@@ -842,21 +856,25 @@ test "mixed namespaces: some shared, some isolated" {
     try std.testing.expect(thread_c.canSee(thread_a));
     try std.testing.expect(thread_c.canSee(thread_a1));
 
-    // Kill A, which should kill A, A1, A2 (entire subtree), showing 9 - 3 = 6
+    // Kill A (not namespace root, just in ns0) - only A is removed, A1 reparented to root
     try v_threads.handleThreadExit(10);
-    try std.testing.expectEqual(6, v_threads.lookup.count());
-    try std.testing.expect(v_threads.lookup.get(10) == null);
-    try std.testing.expect(v_threads.lookup.get(11) == null);
-    try std.testing.expect(v_threads.lookup.get(12) == null);
+    try std.testing.expectEqual(8, v_threads.lookup.count());
+    try std.testing.expect(v_threads.lookup.get(10) == null); // A removed
+    try std.testing.expect(v_threads.lookup.get(11) != null); // A1 still exists
+    try std.testing.expect(v_threads.lookup.get(12) != null); // A2 still exists
+    // A1's parent should now be root
+    try std.testing.expectEqual(root, v_threads.lookup.get(11).?.parent.?);
 
-    // Kill B1, which should kill B1, B2, B1a, giving 6 - 3 = 3
+    // Kill B1 (IS namespace root of ns2) - kills B1, B2, B1a (entire ns2)
     try v_threads.handleThreadExit(21);
-    try std.testing.expectEqual(3, v_threads.lookup.count());
+    try std.testing.expectEqual(5, v_threads.lookup.count());
 
-    // Only root, B, C should remain
+    // Remaining: root, B, C, A1, A2
     try std.testing.expect(v_threads.lookup.get(1) != null);
     try std.testing.expect(v_threads.lookup.get(20) != null);
     try std.testing.expect(v_threads.lookup.get(30) != null);
+    try std.testing.expect(v_threads.lookup.get(11) != null);
+    try std.testing.expect(v_threads.lookup.get(12) != null);
 }
 
 test "stress: verify NsTid mapping correctness across namespaces" {

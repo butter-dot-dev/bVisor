@@ -69,7 +69,7 @@ test "close virtual FD returns success and removes from table" {
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
     const proc_file = try ProcFile.open(caller, "/proc/self");
-    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .proc = proc_file }));
+    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .proc = proc_file }), .{});
 
     const notif = makeNotif(.close, .{
         .pid = init_tid,
@@ -94,7 +94,7 @@ test "after close, read same VFD returns EBADF" {
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
     const proc_file = try ProcFile.open(caller, "/proc/self");
-    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .proc = proc_file }));
+    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .proc = proc_file }), .{});
 
     // Close it
     const close_notif = makeNotif(.close, .{
@@ -171,7 +171,7 @@ test "double close - first succeeds, second EBADF" {
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
     const proc_file = try ProcFile.open(caller, "/proc/self");
-    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .proc = proc_file }));
+    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .proc = proc_file }), .{});
 
     const notif = makeNotif(.close, .{
         .pid = init_tid,

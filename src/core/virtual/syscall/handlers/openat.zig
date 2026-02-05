@@ -11,6 +11,7 @@ const ProcFile = @import("../../fs/backend/procfile.zig").ProcFile;
 const path_router = @import("../../path.zig");
 const Supervisor = @import("../../../Supervisor.zig");
 const types = @import("../../../types.zig");
+const linuxToPosixFlags = types.linuxToPosixFlags;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
 const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 
@@ -132,7 +133,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
             };
 
             // Insert into fd table and return the virtual fd
-            const vfd = caller.fd_table.insert(file) catch {
+            const vfd = caller.fd_table.insert(file, .{ .cloexec = flags.CLOEXEC }) catch {
                 logger.log("openat: failed to insert fd", .{});
                 file.unref();
                 return replyErr(notif.id, .MFILE);
@@ -141,27 +142,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
             return replySuccess(notif.id, @intCast(vfd));
         },
     }
-}
-
-/// Convert linux.O flags to posix.O flags at the syscall boundary
-fn linuxToPosixFlags(linux_flags: linux.O) posix.O {
-    var flags: posix.O = .{};
-
-    flags.ACCMODE = switch (linux_flags.ACCMODE) {
-        .RDONLY => .RDONLY,
-        .WRONLY => .WRONLY,
-        .RDWR => .RDWR,
-    };
-
-    if (linux_flags.CREAT) flags.CREAT = true;
-    if (linux_flags.EXCL) flags.EXCL = true;
-    if (linux_flags.TRUNC) flags.TRUNC = true;
-    if (linux_flags.APPEND) flags.APPEND = true;
-    if (linux_flags.NONBLOCK) flags.NONBLOCK = true;
-    if (linux_flags.CLOEXEC) flags.CLOEXEC = true;
-    if (linux_flags.DIRECTORY) flags.DIRECTORY = true;
-
-    return flags;
 }
 
 // ============================================================================

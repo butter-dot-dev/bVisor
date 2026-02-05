@@ -119,7 +119,7 @@ test "readv single iovec reads data correctly" {
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
     const proc_file = try ProcFile.open(caller, "/proc/self");
-    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .proc = proc_file }));
+    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .proc = proc_file }), .{});
 
     // Set up a single iovec
     var result_buf: [64]u8 = undefined;
@@ -148,7 +148,7 @@ test "readv multiple iovecs distributes data across buffers" {
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
     const proc_file = try ProcFile.open(caller, "/proc/self");
-    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .proc = proc_file }));
+    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .proc = proc_file }), .{});
 
     // Content is "100\n" (4 bytes), distribute across 2-byte buffers
     var buf1: [2]u8 = undefined;

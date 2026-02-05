@@ -12,9 +12,6 @@ pub const NsTid = linux.pid_t;
 pub const AbsTgid = linux.pid_t;
 pub const NsTgid = linux.pid_t;
 
-const ThreadSet = std.AutoHashMapUnmanaged(*Self, void);
-const ThreadList = std.ArrayList(*Self);
-
 const Self = @This();
 
 tid: AbsTid,
@@ -22,7 +19,6 @@ thread_group: *ThreadGroup,
 namespace: *Namespace,
 fd_table: *FdTable,
 parent: ?*Self,
-children: ThreadSet = .empty,
 
 pub fn init(allocator: Allocator, tid: AbsTid, thread_group: ?*ThreadGroup, namespace: ?*Namespace, fd_table: ?*FdTable, parent: ?*Self) !*Self {
     // Create or use provided fd_table
@@ -111,7 +107,6 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
     self.namespace.unref();
     self.fd_table.unref();
 
-    self.children.deinit(allocator);
     allocator.destroy(self);
 }
 
@@ -126,7 +121,7 @@ pub fn getNamespaceRoot(self: *Self) *Self {
 }
 
 pub fn initChild(self: *Self, allocator: Allocator, tid: AbsTid, namespace: ?*Namespace, fd_table: ?*FdTable) !*Self {
-    const child = try Self.init(
+    return Self.init(
         allocator,
         tid,
         null,
@@ -134,42 +129,9 @@ pub fn initChild(self: *Self, allocator: Allocator, tid: AbsTid, namespace: ?*Na
         fd_table,
         self,
     );
-    errdefer child.deinit(allocator);
-
-    try self.children.put(allocator, child, {});
-
-    return child;
-}
-
-pub fn deinitChild(self: *Self, child: *Self, allocator: Allocator) void {
-    self.removeChildLink(child);
-    child.deinit(allocator);
-}
-
-pub fn removeChildLink(self: *Self, child: *Self) void {
-    _ = self.children.remove(child);
 }
 
 /// Check if this Thread can see the target Thread.
 pub fn canSee(self: *Self, target: *Self) bool {
     return self.namespace.contains(target);
-}
-
-/// Collect all descendant Threads (crosses namespace boundaries).
-/// Used for thread exit to kill entire subtree.
-/// Returned slice must be freed by caller.
-pub fn collectSubtreeOwned(self: *Self, allocator: Allocator) ![]*Self {
-    var accumulator = try ThreadList.initCapacity(allocator, 16);
-    try self._collectSubtreeRecursive(&accumulator, allocator);
-    return accumulator.toOwnedSlice(allocator);
-}
-
-fn _collectSubtreeRecursive(self: *Self, accumulator: *ThreadList, allocator: Allocator) !void {
-    // Children first, then self - ensures namespace roots are deinitialized after their children
-    var iter = self.children.iterator();
-    while (iter.next()) |child_entry| {
-        const child: *Self = child_entry.key_ptr.*;
-        try child._collectSubtreeRecursive(accumulator, allocator);
-    }
-    try accumulator.append(allocator, self);
 }

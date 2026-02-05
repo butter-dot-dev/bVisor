@@ -108,7 +108,7 @@ test "writev single iovec writes data" {
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
     const tmp_file = try Tmp.open(&supervisor.overlay, "/tmp/writev_test1", .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
-    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .tmp = tmp_file }));
+    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .tmp = tmp_file }), .{});
 
     const data = "hello";
     var iovecs = [_]posix.iovec_const{
@@ -135,7 +135,7 @@ test "writev multiple iovecs concatenated write" {
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
     const tmp_file = try Tmp.open(&supervisor.overlay, "/tmp/writev_test2", .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
-    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .tmp = tmp_file }));
+    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .tmp = tmp_file }), .{});
 
     const d1 = "hel";
     const d2 = "lo ";

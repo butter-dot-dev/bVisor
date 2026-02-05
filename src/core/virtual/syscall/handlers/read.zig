@@ -95,7 +95,7 @@ test "read from virtual file returns data" {
     // Insert a proc file into the fd table (content "100\n")
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
     const proc_file = try ProcFile.open(caller, "/proc/self");
-    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .proc = proc_file }));
+    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .proc = proc_file }), .{});
 
     // Create a buffer for the result
     var result_buf: [64]u8 = undefined;
@@ -120,7 +120,7 @@ test "read count=5 from larger file returns at most 5 bytes" {
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
     const proc_file = try ProcFile.open(caller, "/proc/self");
-    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .proc = proc_file }));
+    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .proc = proc_file }), .{});
 
     var result_buf: [64]u8 = undefined;
     const notif = makeNotif(.read, .{
@@ -161,7 +161,7 @@ test "read count=0 returns 0" {
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
     const proc_file = try ProcFile.open(caller, "/proc/self");
-    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .proc = proc_file }));
+    const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .proc = proc_file }), .{});
 
     var result_buf: [64]u8 = undefined;
     const notif = makeNotif(.read, .{

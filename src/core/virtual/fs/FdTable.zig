@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const types = @import("../../types.zig");
 const File = @import("File.zig");
+const FdEntry = @import("FdEntry.zig").FdEntry;
 const posix = std.posix;
 
 /// Virtual file descriptor - the fd number visible to the sandboxed process.
@@ -15,9 +16,10 @@ const Self = @This();
 /// FdTable is a refcounted file descriptor table.
 /// When CLONE_FILES is set, parent and child share the same table (refd).
 /// When CLONE_FILES is not set, child gets a clone (copy with fresh refcount).
+/// Each entry is an FdEntry containing a File pointer and per-fd flags (cloexec).
 ref_count: AtomicUsize = undefined,
 allocator: Allocator,
-open_files: std.AutoHashMapUnmanaged(VirtualFD, *File),
+open_files: std.AutoHashMapUnmanaged(VirtualFD, FdEntry),
 next_vfd: VirtualFD = 3, // start after stdin/stdout/stderr
 
 pub fn init(allocator: Allocator) !*Self {
@@ -43,7 +45,7 @@ pub fn unref(self: *Self) void {
         // Unref all files before destroying the hashmap
         var iter = self.open_files.iterator();
         while (iter.next()) |entry| {
-            entry.value_ptr.*.unref();
+            entry.value_ptr.file.unref();
         }
         self.open_files.deinit(self.allocator);
         self.allocator.destroy(self);
@@ -52,18 +54,23 @@ pub fn unref(self: *Self) void {
 
 /// Create an independent copy with refcount=1.
 /// Used when CLONE_FILES is not set.
+/// Each File is copied (not shared), but cloexec flags are preserved.
 pub fn clone(self: *Self, allocator: Allocator) !*Self {
     const new = try allocator.create(Self);
     errdefer self.allocator.destroy(new);
 
     // AutoHashMapUnmanaged has no clone(), so we iterate manually
-    var new_open_files: std.AutoHashMapUnmanaged(VirtualFD, *File) = .empty;
+    var new_open_files: std.AutoHashMapUnmanaged(VirtualFD, FdEntry) = .empty;
     errdefer new_open_files.deinit(self.allocator);
 
     var iter = self.open_files.iterator();
     while (iter.next()) |entry| {
-        const copy = try File.init(allocator, entry.value_ptr.*.backend);
-        try new_open_files.put(self.allocator, entry.key_ptr.*, copy);
+        const old_entry = entry.value_ptr.*;
+        const file_copy = try File.init(allocator, old_entry.file.backend);
+        try new_open_files.put(self.allocator, entry.key_ptr.*, FdEntry{
+            .file = file_copy,
+            .cloexec = old_entry.cloexec,
+        });
     }
 
     new.* = .{
@@ -75,34 +82,97 @@ pub fn clone(self: *Self, allocator: Allocator) !*Self {
     return new;
 }
 
-// Insert a file into the FdTable
-// The File will live with at least one ref until .remove is called
-pub fn insert(self: *Self, file: *File) !VirtualFD {
+/// Insert a new file into the FdTable, returns the assigned vfd.
+/// The File will live with at least one ref until .remove is called.
+/// For newly opened files (refcount should be 1).
+pub fn insert(self: *Self, file: *File, opts: struct { cloexec: bool = false }) !VirtualFD {
     // Programmer error if we call insert with a File that's already had refs taken
     std.debug.assert(file.ref_count.load(.monotonic) == 1);
 
     const vfd = self.next_vfd;
     self.next_vfd += 1;
-    try self.open_files.put(self.allocator, vfd, file);
+
+    try self.open_files.put(self.allocator, vfd, FdEntry{
+        .file = file,
+        .cloexec = opts.cloexec,
+    });
     return vfd;
 }
 
+/// Insert a new file at a specific vfd.
+/// If vfd is already in use, caller must remove() it first.
+/// For newly opened files (refcount should be 1).
+pub fn insert_at(self: *Self, file: *File, vfd: VirtualFD, opts: struct { cloexec: bool = false }) !VirtualFD {
+    // Programmer error if we call insert with a File that's already had refs taken
+    std.debug.assert(file.ref_count.load(.monotonic) == 1);
+
+    // Caller should remove() existing vfd first to avoid leaking the old File
+    std.debug.assert(self.open_files.get(vfd) == null);
+
+    // Ensure next_vfd stays ahead of any manually-assigned vfd
+    if (vfd >= self.next_vfd) {
+        self.next_vfd = vfd + 1;
+    }
+
+    try self.open_files.put(self.allocator, vfd, FdEntry{
+        .file = file,
+        .cloexec = opts.cloexec,
+    });
+    return vfd;
+}
+
+/// Duplicate an existing file to a new vfd (for dup2/dup3 semantics).
+/// The file is shared between old and new fds (true POSIX dup semantics).
+/// If newfd is already in use, caller must remove() it first.
+/// Caller must have already called file.ref() to add a reference.
+pub fn dup_at(self: *Self, file: *File, newfd: VirtualFD, opts: struct { cloexec: bool = false }) !VirtualFD {
+    // For dup, the file should already have at least 2 refs:
+    // one from the original FdEntry, one from the caller's ref() call
+    std.debug.assert(file.ref_count.load(.monotonic) >= 2);
+
+    // Caller should remove() existing vfd first to avoid leaking the old File
+    std.debug.assert(self.open_files.get(newfd) == null);
+
+    // Ensure next_vfd stays ahead of any manually-assigned vfd
+    if (newfd >= self.next_vfd) {
+        self.next_vfd = newfd + 1;
+    }
+
+    try self.open_files.put(self.allocator, newfd, FdEntry{
+        .file = file,
+        .cloexec = opts.cloexec,
+    });
+    return newfd;
+}
+
 /// Get a reference to the file associated with the given vfd.
-/// Caller must call unref()
+/// Caller must call file.unref() when done.
 pub fn get_ref(self: *Self, vfd: VirtualFD) ?*File {
-    const file_ptr = self.open_files.get(vfd);
-    if (file_ptr) |file| {
-        return file.ref();
+    const entry_ptr = self.open_files.get(vfd);
+    if (entry_ptr) |entry| {
+        return entry.file.ref();
     }
     return null;
 }
 
-/// Remove the file associated with the given vfd.
-/// This unrefs the file
+/// Get the full FdEntry (File + cloexec flag) for the given vfd.
+/// Caller must call entry.file.unref() when done.
+/// Use this when checking the cloexec flag
+pub fn get_entry(self: *Self, vfd: VirtualFD) ?FdEntry {
+    const entry_ptr = self.open_files.get(vfd);
+    if (entry_ptr) |entry| {
+        _ = entry.file.ref();
+        return entry;
+    }
+    return null;
+}
+
+/// Remove the FdEntry associated with the given vfd.
+/// This unrefs the File
 pub fn remove(self: *Self, vfd: VirtualFD) bool {
-    const file_ptr = self.open_files.get(vfd);
-    if (file_ptr) |file| {
-        file.unref();
+    const entry_ptr = self.open_files.get(vfd);
+    if (entry_ptr) |entry| {
+        entry.file.unref();
     }
     return self.open_files.remove(vfd);
 }
@@ -122,7 +192,7 @@ test "insert returns incrementing vfds starting at 3" {
         const actual_fd: posix.fd_t = @intCast(100 + i);
         const expected_virtual_fd: VirtualFD = @intCast(3 + i);
         const file = try File.init(testing.allocator, .{ .passthrough = .{ .fd = actual_fd } });
-        const vfd = try table.insert(file);
+        const vfd = try table.insert(file, .{});
         try testing.expectEqual(expected_virtual_fd, vfd);
     }
 }
@@ -132,7 +202,7 @@ test "get returns pointer to file" {
     defer table.unref();
 
     const file = try File.init(testing.allocator, .{ .passthrough = .{ .fd = 42 } });
-    const vfd = try table.insert(file);
+    const vfd = try table.insert(file, .{});
 
     const retrieved = table.get_ref(vfd);
     defer if (retrieved) |f| f.unref();
@@ -154,7 +224,7 @@ test "remove returns true for existing vfd" {
     defer table.unref();
 
     const file = try File.init(testing.allocator, .{ .passthrough = .{ .fd = 100 } });
-    const vfd = try table.insert(file);
+    const vfd = try table.insert(file, .{});
 
     const removed = table.remove(vfd);
     try testing.expect(removed);
@@ -182,7 +252,7 @@ test "CLONE_FILES scenario: shared table, changes visible to both" {
 
     // Insert via original
     const file = try File.init(testing.allocator, .{ .passthrough = .{ .fd = 100 } });
-    const vfd = try table.insert(file);
+    const vfd = try table.insert(file, .{});
 
     // Should be visible via shared reference
     const shared_ref = shared.get_ref(vfd);
@@ -206,13 +276,13 @@ test "insert then remove then insert does not reuse VFD" {
     defer table.unref();
 
     const file = try File.init(testing.allocator, .{ .passthrough = .{ .fd = 100 } });
-    const vfd1 = try table.insert(file);
+    const vfd1 = try table.insert(file, .{});
     try testing.expectEqual(@as(VirtualFD, 3), vfd1);
 
     _ = table.remove(vfd1);
 
     const file2 = try File.init(testing.allocator, .{ .passthrough = .{ .fd = 101 } });
-    const vfd2 = try table.insert(file2);
+    const vfd2 = try table.insert(file2, .{});
     try testing.expectEqual(@as(VirtualFD, 4), vfd2);
 }
 
@@ -221,7 +291,7 @@ test "get after remove returns null" {
     defer table.unref();
 
     const file = try File.init(testing.allocator, .{ .passthrough = .{ .fd = 100 } });
-    const vfd = try table.insert(file);
+    const vfd = try table.insert(file, .{});
     _ = table.remove(vfd);
 
     const retrieved = table.get_ref(vfd);
@@ -237,7 +307,7 @@ test "remove does not call file.close (caller responsibility)" {
     // If remove called close(), the fd would be invalid and later test cleanup would fail
     // This test verifies behavioral correctness: remove only removes from the table
     const file = try File.init(testing.allocator, .{ .passthrough = .{ .fd = 42 } });
-    const vfd = try table.insert(file);
+    const vfd = try table.insert(file, .{});
 
     const removed = table.remove(vfd);
     try testing.expect(removed);
@@ -256,7 +326,7 @@ test "unref from refcount=2 keeps table alive" {
 
     // Table should still be usable
     const file = try File.init(testing.allocator, .{ .passthrough = .{ .fd = 100 } });
-    _ = try table.insert(file);
+    _ = try table.insert(file, .{});
 
     table.unref(); // final cleanup
 }
@@ -273,7 +343,7 @@ test "CLONE_FILES not set: cloned table, changes independent" {
 
     // Insert a file into original
     const file = try File.init(testing.allocator, .{ .passthrough = .{ .fd = 100 } });
-    const vfd = try original.insert(file);
+    const vfd = try original.insert(file, .{});
 
     // Clone the table (simulates fork without CLONE_FILES)
     const cloned = try original.clone(testing.allocator);
@@ -298,7 +368,7 @@ test "CLONE_FILES not set: cloned table, changes independent" {
 
     // Insert into original - should not affect cloned
     const file2 = try File.init(testing.allocator, .{ .passthrough = .{ .fd = 101 } });
-    const vfd2 = try original.insert(file2);
+    const vfd2 = try original.insert(file2, .{});
     const orig_ref3 = original.get_ref(vfd2);
     defer if (orig_ref3) |f| f.unref();
     const cloned_ref3 = cloned.get_ref(vfd2);
@@ -312,14 +382,14 @@ test "clone inherits next_vfd so first insert continues sequence" {
     defer original.unref();
 
     // Insert some files to advance next_vfd
-    _ = try original.insert(try File.init(testing.allocator, .{ .passthrough = .{ .fd = 100 } })); // vfd 3
-    _ = try original.insert(try File.init(testing.allocator, .{ .passthrough = .{ .fd = 101 } })); // vfd 4
+    _ = try original.insert(try File.init(testing.allocator, .{ .passthrough = .{ .fd = 100 } }), .{}); // vfd 3
+    _ = try original.insert(try File.init(testing.allocator, .{ .passthrough = .{ .fd = 101 } }), .{}); // vfd 4
 
     const cloned = try original.clone(testing.allocator);
     defer cloned.unref();
 
     // Clone's first insert should continue from where original left off
-    const clone_vfd = try cloned.insert(try File.init(testing.allocator, .{ .passthrough = .{ .fd = 200 } }));
+    const clone_vfd = try cloned.insert(try File.init(testing.allocator, .{ .passthrough = .{ .fd = 200 } }), .{});
     try testing.expectEqual(@as(VirtualFD, 5), clone_vfd);
 }
 
@@ -327,14 +397,14 @@ test "inserts in both after clone produce no VFD collisions" {
     const original = try Self.init(testing.allocator);
     defer original.unref();
 
-    _ = try original.insert(try File.init(testing.allocator, .{ .passthrough = .{ .fd = 100 } })); // vfd 3
+    _ = try original.insert(try File.init(testing.allocator, .{ .passthrough = .{ .fd = 100 } }), .{}); // vfd 3
 
     const cloned = try original.clone(testing.allocator);
     defer cloned.unref();
 
     // Both insert independently
-    const orig_vfd = try original.insert(try File.init(testing.allocator, .{ .passthrough = .{ .fd = 200 } }));
-    const clone_vfd = try cloned.insert(try File.init(testing.allocator, .{ .passthrough = .{ .fd = 300 } }));
+    const orig_vfd = try original.insert(try File.init(testing.allocator, .{ .passthrough = .{ .fd = 200 } }), .{});
+    const clone_vfd = try cloned.insert(try File.init(testing.allocator, .{ .passthrough = .{ .fd = 300 } }), .{});
 
     // Both should get vfd 4 since they diverge from the same next_vfd
     try testing.expectEqual(@as(VirtualFD, 4), orig_vfd);
@@ -356,7 +426,7 @@ test "insert 1000 files returns all unique VFDs and all retrievable" {
     var vfds: [1000]VirtualFD = undefined;
     for (0..1000) |i| {
         const fd: posix.fd_t = @intCast(i);
-        vfds[i] = try table.insert(try File.init(testing.allocator, .{ .passthrough = .{ .fd = fd } }));
+        vfds[i] = try table.insert(try File.init(testing.allocator, .{ .passthrough = .{ .fd = fd } }), .{});
     }
 
     // All VFDs should be unique and sequential
@@ -378,7 +448,7 @@ test "insert one of each backend type - all distinguishable by union tag" {
     defer table.unref();
 
     // Passthrough
-    const vfd_pt = try table.insert(try File.init(allocator, .{ .passthrough = .{ .fd = 42 } }));
+    const vfd_pt = try table.insert(try File.init(allocator, .{ .passthrough = .{ .fd = 42 } }), .{});
     // Proc
     var proc_content: [256]u8 = undefined;
     @memcpy(proc_content[0..4], "100\n");
@@ -386,7 +456,7 @@ test "insert one of each backend type - all distinguishable by union tag" {
         .content = proc_content,
         .content_len = 4,
         .offset = 0,
-    } }));
+    } }), .{});
 
     // Verify tags are distinguishable
     const pt_ref = table.get_ref(vfd_pt).?;
@@ -402,7 +472,7 @@ test "get_ref increments File refcount" {
     defer table.unref();
 
     const file = try File.init(testing.allocator, .{ .passthrough = .{ .fd = 42 } });
-    const vfd = try table.insert(file);
+    const vfd = try table.insert(file, .{});
     try testing.expectEqual(@as(usize, 1), file.ref_count.load(.monotonic));
 
     const got = table.get_ref(vfd).?;
@@ -417,7 +487,7 @@ test "remove decrements File refcount but get_ref keeps it alive" {
     defer table.unref();
 
     const file = try File.init(testing.allocator, .{ .passthrough = .{ .fd = 77 } });
-    const vfd = try table.insert(file);
+    const vfd = try table.insert(file, .{});
     try testing.expectEqual(@as(usize, 1), file.ref_count.load(.monotonic));
 
     // get_ref bumps to 2
@@ -440,7 +510,7 @@ test "multiple get_ref calls accumulate refcount" {
     defer table.unref();
 
     const file = try File.init(testing.allocator, .{ .passthrough = .{ .fd = 55 } });
-    const vfd = try table.insert(file);
+    const vfd = try table.insert(file, .{});
     try testing.expectEqual(@as(usize, 1), file.ref_count.load(.monotonic));
 
     const ref1 = table.get_ref(vfd).?;

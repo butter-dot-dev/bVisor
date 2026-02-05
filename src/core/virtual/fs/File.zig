@@ -1,4 +1,5 @@
 const std = @import("std");
+const linux = std.os.linux;
 const posix = std.posix;
 
 const Cow = @import("backend/cow.zig").Cow;
@@ -21,11 +22,21 @@ const Self = @This();
 backend: Backend,
 allocator: std.mem.Allocator,
 ref_count: AtomicUsize = undefined,
+open_flags: posix.O = .{},
 
 pub fn init(allocator: std.mem.Allocator, backend: Backend) !*Self {
+    return initWithFlags(allocator, backend, .{});
+}
+
+pub fn initWithFlags(allocator: std.mem.Allocator, backend: Backend, open_flags: posix.O) !*Self {
     const self = try allocator.create(Self);
     errdefer allocator.destroy(self);
-    self.* = .{ .backend = backend, .allocator = allocator, .ref_count = AtomicUsize.init(1) };
+    self.* = .{
+        .backend = backend,
+        .allocator = allocator,
+        .ref_count = AtomicUsize.init(1),
+        .open_flags = open_flags,
+    };
     return self;
 }
 
