@@ -7,6 +7,9 @@ const Tmp = @import("backend/tmp.zig").Tmp;
 const ProcFile = @import("backend/procfile.zig").ProcFile;
 const Passthrough = @import("backend/passthrough.zig").Passthrough;
 
+const types = @import("../../types.zig");
+const Stat = types.Stat;
+
 const AtomicUsize = std.atomic.Value(usize);
 
 pub const BackendType = enum { passthrough, cow, tmp, proc };
@@ -85,4 +88,47 @@ pub fn statx(self: *Self) !linux.Statx {
         .tmp => |*f| return f.statx(),
         .proc => |*f| return f.statx(),
     }
+}
+
+/// Convert a `linux.Statx` (internal representation used by all File backends)
+/// into the aarch64 `struct stat` ABI expected by fstat(2) callers.
+///
+/// Only fields whose corresponding `statx.mask` bits are set are considered
+/// populated; unset fields are left as zero in the output.
+pub fn statxToStat(sx: linux.Statx) Stat {
+    var st: Stat = std.mem.zeroes(Stat);
+
+    if (sx.mask.MODE) st.st_mode = sx.mode;
+    if (sx.mask.NLINK) st.st_nlink = sx.nlink;
+    if (sx.mask.SIZE) st.st_size = @bitCast(sx.size);
+    if (sx.mask.INO) st.st_ino = sx.ino;
+
+    // UID/GID share a single mask bit in statx
+    if (sx.mask.UID) st.st_uid = sx.uid;
+    if (sx.mask.GID) st.st_gid = sx.gid;
+
+    if (sx.mask.ATIME) {
+        st.st_atime = sx.atime.sec;
+        st.st_atime_nsec = @intCast(sx.atime.nsec);
+    }
+    if (sx.mask.MTIME) {
+        st.st_mtime = sx.mtime.sec;
+        st.st_mtime_nsec = @intCast(sx.mtime.nsec);
+    }
+    if (sx.mask.CTIME) {
+        st.st_ctime = sx.ctime.sec;
+        st.st_ctime_nsec = @intCast(sx.ctime.nsec);
+    }
+    if (sx.mask.BLOCKS) st.st_blocks = @bitCast(sx.blocks);
+
+    // Kernel always populates blksize regardless of the mask
+    st.st_blksize = @intCast(sx.blksize);
+
+    // dev/rdev: statx splits these into major/minor pairs.
+    // Recombine with the standard makedev formula: (major << 8) | minor.
+    // This matches the glibc/musl makedev() for basic device numbers.
+    st.st_dev = (sx.dev_minor & 0xff) | (@as(u64, sx.dev_major) << 8) | (@as(u64, sx.dev_minor & ~@as(u32, 0xff)) << 12);
+    st.st_rdev = (@as(u64, sx.rdev_major) << 8) | sx.rdev_minor;
+
+    return st;
 }

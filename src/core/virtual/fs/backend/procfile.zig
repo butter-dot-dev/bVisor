@@ -134,10 +134,12 @@ pub const ProcFile = struct {
             .NLINK = true,
             .SIZE = true,
         };
+
         statx_buf.mode = linux.S.IFREG | 0o444; // regular file, read only
         statx_buf.nlink = 1;
-        statx_buf.blksize = 4096;
         statx_buf.size = self.content_len;
+
+        statx_buf.blksize = 4096; // doesn't require a mask bit because none exists
 
         // TODO: implement these
         // statx_buf.ino // as counter in FdTable?
