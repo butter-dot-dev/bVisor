@@ -1,4 +1,5 @@
 const std = @import("std");
+const linux = std.os.linux;
 const posix = std.posix;
 const OverlayRoot = @import("../../OverlayRoot.zig");
 
@@ -22,6 +23,21 @@ pub const Passthrough = struct {
 
     pub fn close(self: *Passthrough) void {
         posix.close(self.fd);
+    }
+
+    pub fn statx(self: *Passthrough) !linux.Statx {
+        var statx_buf: linux.Statx = std.mem.zeroes(linux.Statx);
+        const rc = linux.statx(
+            self.fd,
+            "",
+            linux.AT.EMPTY_PATH,
+            linux.STATX.BASIC_STATS,
+            &statx_buf,
+        );
+        if (linux.errno(rc) != .SUCCESS) {
+            return error.StatxFail;
+        }
+        return statx_buf;
     }
 };
 

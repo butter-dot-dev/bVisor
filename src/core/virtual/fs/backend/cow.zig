@@ -1,4 +1,5 @@
 const std = @import("std");
+const linux = std.os.linux;
 const posix = std.posix;
 const OverlayRoot = @import("../../OverlayRoot.zig");
 
@@ -52,6 +53,27 @@ pub const Cow = union(enum) {
             .readthrough => |fd| posix.close(fd),
             .writecopy => |fd| posix.close(fd),
         }
+    }
+
+    pub fn statx(self: *Cow) !linux.Statx {
+        var statx_buf: linux.Statx = std.mem.zeroes(linux.Statx);
+
+        const backing_fd = switch (self.*) {
+            .readthrough => |fd| fd,
+            .writecopy => |fd| fd,
+        };
+
+        const rc = linux.statx(
+            backing_fd,
+            "",
+            linux.AT.EMPTY_PATH,
+            linux.STATX.BASIC_STATS,
+            &statx_buf,
+        );
+        if (linux.errno(rc) != .SUCCESS) {
+            return error.StatxFail;
+        }
+        return statx_buf;
     }
 };
 

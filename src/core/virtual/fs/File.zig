@@ -77,3 +77,12 @@ pub fn close(self: *Self) void {
         .proc => |*f| f.close(),
     }
 }
+
+pub fn statx(self: *Self) !linux.Statx {
+    switch (self.backend) {
+        .passthrough => |*f| return f.statx(),
+        .cow => |*f| return f.statx(),
+        .tmp => |*f| return f.statx(),
+        .proc => |*f| return f.statx(),
+    }
+}
