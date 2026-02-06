@@ -61,7 +61,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     // The cloexec flag is per-fd, not inherited from oldfd
     _ = caller.fd_table.dup_at(file, newfd, .{ .cloexec = flags.CLOEXEC }) catch {
         logger.log("dup3: failed to dup to newfd={d}", .{newfd});
-        file.unref(); // Release the ref since dup_at failed
         return replyErr(notif.id, .NOMEM);
     };
 
