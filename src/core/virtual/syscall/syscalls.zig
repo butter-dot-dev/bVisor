@@ -18,6 +18,7 @@ const kill = @import("handlers/kill.zig");
 const tkill = @import("handlers/tkill.zig");
 const exit_ = @import("handlers/exit.zig");
 const exit_group = @import("handlers/exit_group.zig");
+const dup = @import("handlers/dup.zig");
 const dup3 = @import("handlers/dup3.zig");
 
 pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
@@ -32,6 +33,7 @@ pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.
         .write => write.handle(notif, supervisor),
         .readv => readv.handle(notif, supervisor),
         .writev => writev.handle(notif, supervisor),
+        .dup => dup.handle(notif, supervisor),
         .dup3 => dup3.handle(notif, supervisor),
         // Implemented - process
         .getpid => getpid.handle(notif, supervisor),
@@ -53,7 +55,6 @@ pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.
         .fstatat64,
         .fcntl,
         .ioctl,
-        .dup,
         .pipe2,
         .lseek,
         .getcwd,

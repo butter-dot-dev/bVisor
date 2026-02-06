@@ -85,24 +85,37 @@ pub fn clone(self: *Self, allocator: Allocator) !*Self {
 /// Insert a new file into the FdTable, returns the assigned vfd.
 /// The File will live with at least one ref until .remove is called.
 /// For newly opened files (refcount should be 1).
-pub fn insert(self: *Self, file: *File, opts: struct { cloexec: bool = false }) !VirtualFD {
+pub fn insert(
+    self: *Self,
+    file: *File,
+    opts: struct { cloexec: bool = false },
+) !VirtualFD {
     // Programmer error if we call insert with a File that's already had refs taken
     std.debug.assert(file.ref_count.load(.monotonic) == 1);
 
     const vfd = self.next_vfd;
     self.next_vfd += 1;
 
-    try self.open_files.put(self.allocator, vfd, FdEntry{
-        .file = file,
-        .cloexec = opts.cloexec,
-    });
+    try self.open_files.put(
+        self.allocator,
+        vfd,
+        FdEntry{
+            .file = file,
+            .cloexec = opts.cloexec,
+        },
+    );
     return vfd;
 }
 
 /// Insert a new file at a specific vfd.
 /// If vfd is already in use, caller must remove() it first.
 /// For newly opened files (refcount should be 1).
-pub fn insert_at(self: *Self, file: *File, vfd: VirtualFD, opts: struct { cloexec: bool = false }) !VirtualFD {
+pub fn insert_at(
+    self: *Self,
+    file: *File,
+    vfd: VirtualFD,
+    opts: struct { cloexec: bool = false },
+) !VirtualFD {
     // Programmer error if we call insert with a File that's already had refs taken
     std.debug.assert(file.ref_count.load(.monotonic) == 1);
 
@@ -114,20 +127,51 @@ pub fn insert_at(self: *Self, file: *File, vfd: VirtualFD, opts: struct { cloexe
         self.next_vfd = vfd + 1;
     }
 
-    try self.open_files.put(self.allocator, vfd, FdEntry{
-        .file = file,
-        .cloexec = opts.cloexec,
-    });
+    try self.open_files.put(
+        self.allocator,
+        vfd,
+        FdEntry{
+            .file = file,
+            .cloexec = opts.cloexec,
+        },
+    );
+    return vfd;
+}
+
+/// Duplicate an existing File to the next available vfd (for dup semantics).
+/// The file is shared between old and new fds (true POSIX dup semantics).
+/// Returns the newly allocated vfd.
+pub fn dup(self: *Self, file: *File) !VirtualFD {
+    // Get a new reference to the File
+    _ = file.ref();
+    errdefer file.unref();
+
+    const vfd = self.next_vfd;
+    self.next_vfd += 1;
+
+    try self.open_files.put(
+        self.allocator,
+        vfd,
+        FdEntry{
+            .file = file,
+            .cloexec = false,
+        },
+    );
     return vfd;
 }
 
 /// Duplicate an existing file to a new vfd (for dup2/dup3 semantics).
 /// The file is shared between old and new fds (true POSIX dup semantics).
 /// If newfd is already in use, caller must remove() it first.
-/// Caller must have already called file.ref() to add a reference.
-pub fn dup_at(self: *Self, file: *File, newfd: VirtualFD, opts: struct { cloexec: bool = false }) !VirtualFD {
+pub fn dup_at(
+    self: *Self,
+    file: *File,
+    newfd: VirtualFD,
+    opts: struct { cloexec: bool = false },
+) !VirtualFD {
     // Get a new reference to the File
     _ = file.ref();
+    errdefer file.unref();
 
     // Caller should remove() existing vfd first to avoid leaking the old File
     std.debug.assert(self.open_files.get(newfd) == null);
@@ -137,10 +181,14 @@ pub fn dup_at(self: *Self, file: *File, newfd: VirtualFD, opts: struct { cloexec
         self.next_vfd = newfd + 1;
     }
 
-    try self.open_files.put(self.allocator, newfd, FdEntry{
-        .file = file,
-        .cloexec = opts.cloexec,
-    });
+    try self.open_files.put(
+        self.allocator,
+        newfd,
+        FdEntry{
+            .file = file,
+            .cloexec = opts.cloexec,
+        },
+    );
     return newfd;
 }
 
