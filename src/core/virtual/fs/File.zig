@@ -2,6 +2,9 @@ const std = @import("std");
 const linux = std.os.linux;
 const posix = std.posix;
 
+const Thread = @import("../proc/Thread.zig");
+const OverlayRoot = @import("../OverlayRoot.zig");
+
 const Cow = @import("backend/cow.zig").Cow;
 const Tmp = @import("backend/tmp.zig").Tmp;
 const ProcFile = @import("backend/procfile.zig").ProcFile;
@@ -88,6 +91,15 @@ pub fn statx(self: *Self) !linux.Statx {
         .tmp => |*f| return f.statx(),
         .proc => |*f| return f.statx(),
     }
+}
+
+pub fn statxByPath(backend_type: BackendType, overlay: *OverlayRoot, path: []const u8, caller: ?*Thread) !linux.Statx {
+    return switch (backend_type) {
+        .passthrough => Passthrough.statxByPath(path),
+        .cow => Cow.statxByPath(overlay, path),
+        .tmp => Tmp.statxByPath(overlay, path),
+        .proc => ProcFile.statxByPath(caller.?, path),
+    };
 }
 
 /// Convert a `linux.Statx` (internal representation used by all File backends)

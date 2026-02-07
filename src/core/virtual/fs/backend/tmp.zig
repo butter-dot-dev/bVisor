@@ -35,9 +35,26 @@ pub const Tmp = struct {
             linux.STATX.BASIC_STATS,
             &statx_buf,
         );
-        if (linux.errno(rc) != .SUCCESS) {
-            return error.StatxFail;
-        }
+        if (linux.errno(rc) != .SUCCESS) return error.StatxFail;
+        return statx_buf;
+    }
+
+    pub fn statxByPath(overlay: *OverlayRoot, path: []const u8) !linux.Statx {
+        var resolve_buf: [512]u8 = undefined;
+        const resolved = try overlay.resolveTmp(path, &resolve_buf);
+
+        const fd = try posix.open(resolved, .{ .PATH = true }, 0);
+        defer posix.close(fd);
+
+        var statx_buf: linux.Statx = std.mem.zeroes(linux.Statx);
+        const rc = linux.statx(
+            fd,
+            "",
+            linux.AT.EMPTY_PATH,
+            linux.STATX.BASIC_STATS,
+            &statx_buf,
+        );
+        if (linux.errno(rc) != .SUCCESS) return error.StatxFail;
         return statx_buf;
     }
 };

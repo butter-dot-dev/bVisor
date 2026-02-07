@@ -152,6 +152,11 @@ pub const ProcFile = struct {
 
         return statx_buf;
     }
+
+    pub fn statxByPath(caller: *Thread, path: []const u8) !linux.Statx {
+        var file = try ProcFile.open(caller, path);
+        return file.statx();
+    }
 };
 
 // ============================================================================

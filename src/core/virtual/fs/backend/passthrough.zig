@@ -34,9 +34,24 @@ pub const Passthrough = struct {
             linux.STATX.BASIC_STATS,
             &statx_buf,
         );
-        if (linux.errno(rc) != .SUCCESS) {
-            return error.StatxFail;
-        }
+        if (linux.errno(rc) != .SUCCESS) return error.StatxFail;
+        return statx_buf;
+    }
+
+    pub fn statxByPath(path: []const u8) !linux.Statx {
+        // Open O_PATH (no permissions needed, works on any file type)
+        const fd = try posix.open(path, .{ .PATH = true }, 0);
+        defer posix.close(fd);
+
+        var statx_buf: linux.Statx = std.mem.zeroes(linux.Statx);
+        const rc = linux.statx(
+            fd,
+            "",
+            linux.AT.EMPTY_PATH,
+            linux.STATX.BASIC_STATS,
+            &statx_buf,
+        );
+        if (linux.errno(rc) != .SUCCESS) return error.StatxFail;
         return statx_buf;
     }
 };
