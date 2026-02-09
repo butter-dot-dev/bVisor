@@ -165,7 +165,7 @@ pub const ProcFile = struct {
             linux.SEEK.END => @intCast(self.content_len),
             else => return error.InvalidArgument,
         };
-        const new_offset = base + offset;
+        const new_offset = std.math.add(i64, base, offset) catch return error.InvalidArgument;
         if (new_offset < 0) return error.InvalidArgument;
         self.offset = @intCast(new_offset);
         return new_offset;
