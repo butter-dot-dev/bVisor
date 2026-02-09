@@ -32,8 +32,8 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     // Look up the file
     var file: *File = undefined;
     {
-        supervisor.mutex.lock();
-        defer supervisor.mutex.unlock();
+        supervisor.mutex.lockUncancelable(supervisor.io);
+        defer supervisor.mutex.unlock(supervisor.io);
 
         // Get caller Thread
         const caller = supervisor.guest_threads.get(caller_tid) catch |err| {

@@ -49,8 +49,8 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
         var file: *File = undefined;
         {
-            supervisor.mutex.lock();
-            defer supervisor.mutex.unlock();
+            supervisor.mutex.lockUncancelable(supervisor.io);
+            defer supervisor.mutex.unlock(supervisor.io);
 
             const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
                 std.log.err("fstatat64: Thread not found with tid={d}: {}", .{ caller_tid, err });
@@ -95,8 +95,8 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
             // For proc, sync Threads and get caller
             var caller: ?*Thread = null;
             if (backend == .proc) {
-                supervisor.mutex.lock();
-                defer supervisor.mutex.unlock();
+                supervisor.mutex.lockUncancelable(supervisor.io);
+                defer supervisor.mutex.unlock(supervisor.io);
 
                 supervisor.guest_threads.syncNewThreads() catch |err| {
                     logger.log("fstatat64: syncNewThreads failed: {}", .{err});

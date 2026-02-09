@@ -97,6 +97,8 @@ pub const Cow = union(enum) {
         );
         if (linux.errno(rc) != .SUCCESS) return error.StatxFail;
         return statx_buf;
+    }
+
     pub fn lseek(self: *Cow, offset: i64, whence: u32) !i64 {
         const fd = switch (self.*) {
             inline else => |fd| fd,

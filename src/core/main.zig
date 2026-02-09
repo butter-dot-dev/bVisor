@@ -29,12 +29,9 @@ test {
     _ = @import("virtual/syscall/handlers/writev.zig");
     _ = @import("virtual/syscall/handlers/dup.zig");
     _ = @import("virtual/syscall/handlers/dup3.zig");
-<<<<<<< Updated upstream
     _ = @import("virtual/syscall/handlers/fstat.zig");
     _ = @import("virtual/syscall/handlers/fstatat64.zig");
-=======
     _ = @import("virtual/syscall/handlers/lseek.zig");
->>>>>>> Stashed changes
     _ = @import("virtual/syscall/e2e_test.zig");
     _ = @import("virtual/OverlayRoot.zig");
     _ = @import("virtual/fs/backend/passthrough.zig");

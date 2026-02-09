@@ -125,7 +125,6 @@ pub const ProcFile = struct {
         _ = self;
     }
 
-<<<<<<< Updated upstream
     pub fn statx(self: *ProcFile) !linux.Statx {
         var statx_buf: linux.Statx = std.mem.zeroes(linux.Statx);
 
@@ -157,7 +156,8 @@ pub const ProcFile = struct {
     pub fn statxByPath(caller: *Thread, path: []const u8) !linux.Statx {
         var file = try ProcFile.open(caller, path);
         return file.statx();
-=======
+    }
+
     pub fn lseek(self: *ProcFile, offset: i64, whence: u32) !i64 {
         const base: i64 = switch (whence) {
             linux.SEEK.SET => 0,
@@ -169,7 +169,6 @@ pub const ProcFile = struct {
         if (new_offset < 0) return error.InvalidArgument;
         self.offset = @intCast(new_offset);
         return new_offset;
->>>>>>> Stashed changes
     }
 };
 

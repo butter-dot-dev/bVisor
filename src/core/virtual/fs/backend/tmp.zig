@@ -62,6 +62,8 @@ pub const Tmp = struct {
         );
         if (linux.errno(rc) != .SUCCESS) return error.StatxFail;
         return statx_buf;
+    }
+
     pub fn lseek(self: *Tmp, offset: i64, whence: u32) !i64 {
         const result = linux.lseek(self.fd, offset, @intCast(whence));
         if (linux.errno(result) != .SUCCESS) return error.SyscallFailed;
