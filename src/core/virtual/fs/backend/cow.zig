@@ -1,4 +1,5 @@
 const std = @import("std");
+const linux = std.os.linux;
 const posix = std.posix;
 const OverlayRoot = @import("../../OverlayRoot.zig");
 
@@ -54,6 +55,49 @@ pub const Cow = union(enum) {
             inline else => |fd| _ = std.posix.system.close(fd),
         }
     }
+
+    pub fn statx(self: *Cow) !linux.Statx {
+        var statx_buf: linux.Statx = std.mem.zeroes(linux.Statx);
+
+        const backing_fd = switch (self.*) {
+            .readthrough => |fd| fd,
+            .writecopy => |fd| fd,
+        };
+
+        const rc = linux.statx(
+            backing_fd,
+            "",
+            linux.AT.EMPTY_PATH,
+            linux.STATX.BASIC_STATS,
+            &statx_buf,
+        );
+        if (linux.errno(rc) != .SUCCESS) return error.StatxFail;
+        return statx_buf;
+    }
+
+    pub fn statxByPath(overlay: *OverlayRoot, path: []const u8) !linux.Statx {
+        if (comptime builtin.os.tag != .linux) return error.StatxFail;
+
+        var cow_path_buf: [512]u8 = undefined;
+        const real_path = if (overlay.cowExists(path))
+            try overlay.resolveCow(path, &cow_path_buf)
+        else
+            path;
+
+        const fd = try posix.open(real_path, .{ .PATH = true }, 0);
+        defer posix.close(fd);
+
+        var statx_buf: linux.Statx = std.mem.zeroes(linux.Statx);
+        const rc = linux.statx(
+            fd,
+            "",
+            linux.AT.EMPTY_PATH,
+            linux.STATX.BASIC_STATS,
+            &statx_buf,
+        );
+        if (linux.errno(rc) != .SUCCESS) return error.StatxFail;
+        return statx_buf;
+    }
 };
 
 /// Copy a file from src to dst using posix calls.
@@ -74,6 +118,7 @@ fn copyFile(src: []const u8, dst: []const u8) !void {
 
 const testing = std.testing;
 const ls_path = "/bin/ls";
+const builtin = @import("builtin");
 
 test "opening /usr/bin/ls opens in readthrough mode" {
     const io = testing.io;
