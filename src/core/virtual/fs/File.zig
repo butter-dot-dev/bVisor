@@ -105,7 +105,7 @@ pub fn statxByPath(backend_type: BackendType, overlay: *OverlayRoot, path: []con
 /// Encode major/minor into a dev_t using the full Linux makedev formula
 /// (linux/kdev_t.h new_encode_dev).
 fn makedev(major: u32, minor: u32) u64 {
-    return (minor & 0xff) |
+    return (@as(u64, minor & 0xff)) |
         (@as(u64, major & 0xfff) << 8) |
         (@as(u64, minor & ~@as(u32, 0xff)) << 12) |
         (@as(u64, major & ~@as(u32, 0xfff)) << 32);

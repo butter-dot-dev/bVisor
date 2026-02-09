@@ -23,7 +23,7 @@ const write_handler = @import("handlers/write.zig").handle;
 const close_handler = @import("handlers/close.zig").handle;
 const readv_handler = @import("handlers/readv.zig").handle;
 const writev_handler = @import("handlers/writev.zig").handle;
-const fstat_handler = @import("handlers/fstat.zig").handle;
+const fstat_handler = @import("handlers/fstatat64.zig").handle;
 
 const Stat = @import("../../types.zig").Stat;
 

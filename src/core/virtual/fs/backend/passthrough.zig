@@ -39,6 +39,8 @@ pub const Passthrough = struct {
     }
 
     pub fn statxByPath(path: []const u8) !linux.Statx {
+        if (comptime builtin.os.tag != .linux) return error.StatxFail;
+
         // Open O_PATH (no permissions needed, works on any file type)
         const fd = try posix.open(path, .{ .PATH = true }, 0);
         defer posix.close(fd);

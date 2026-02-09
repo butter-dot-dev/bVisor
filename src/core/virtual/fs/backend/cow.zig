@@ -75,6 +75,8 @@ pub const Cow = union(enum) {
     }
 
     pub fn statxByPath(overlay: *OverlayRoot, path: []const u8) !linux.Statx {
+        if (comptime builtin.os.tag != .linux) return error.StatxFail;
+
         var cow_path_buf: [512]u8 = undefined;
         const real_path = if (overlay.cowExists(path))
             try overlay.resolveCow(path, &cow_path_buf)
@@ -115,6 +117,7 @@ fn copyFile(src: []const u8, dst: []const u8) !void {
 
 const testing = std.testing;
 const ls_path = "/bin/ls";
+const builtin = @import("builtin");
 
 test "opening /usr/bin/ls opens in readthrough mode" {
     const io = testing.io;

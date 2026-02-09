@@ -3,6 +3,8 @@ const linux = std.os.linux;
 const posix = std.posix;
 const OverlayRoot = @import("../../OverlayRoot.zig");
 
+const builtin = @import("builtin");
+
 pub const Tmp = struct {
     fd: posix.fd_t,
 
@@ -40,6 +42,8 @@ pub const Tmp = struct {
     }
 
     pub fn statxByPath(overlay: *OverlayRoot, path: []const u8) !linux.Statx {
+        if (comptime builtin.os.tag != .linux) return error.StatxFail;
+
         var resolve_buf: [512]u8 = undefined;
         const resolved = try overlay.resolveTmp(path, &resolve_buf);
 
