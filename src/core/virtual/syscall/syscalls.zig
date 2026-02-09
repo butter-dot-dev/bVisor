@@ -39,6 +39,8 @@ pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.
         .dup3 => dup3.handle(notif, supervisor),
         .fstat => fstat.handle(notif, supervisor),
         .fstatat64 => fstatat64.handle(notif, supervisor),
+        .uname => uname.handle(notif, supervisor), // leaks kernel version, hostname
+        .sysinfo => sysinfo.handle(notif, supervisor), // leaks total RAM, uptime, load
         // Implemented - process
         .getpid => getpid.handle(notif, supervisor),
         .getppid => getppid.handle(notif, supervisor),
@@ -68,8 +70,6 @@ pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.
         .set_tid_address,
         .execve,
         // To implement - should virtualize (info leak in multitenant)
-        .uname, // leaks kernel version, hostname
-        .sysinfo, // leaks total RAM, uptime, load
         .getrlimit, // leaks resource config
         .getrusage, // leaks resource usage
         => {
