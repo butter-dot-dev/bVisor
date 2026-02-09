@@ -102,6 +102,15 @@ pub fn statxByPath(backend_type: BackendType, overlay: *OverlayRoot, path: []con
     };
 }
 
+/// Encode major/minor into a dev_t using the full Linux makedev formula
+/// (linux/kdev_t.h new_encode_dev).
+fn makedev(major: u32, minor: u32) u64 {
+    return (minor & 0xff) |
+        (@as(u64, major & 0xfff) << 8) |
+        (@as(u64, minor & ~@as(u32, 0xff)) << 12) |
+        (@as(u64, major & ~@as(u32, 0xfff)) << 32);
+}
+
 /// Convert a `linux.Statx` (internal representation used by all File backends)
 /// into the aarch64 `struct stat` ABI expected by fstat(2) callers.
 ///
@@ -137,10 +146,10 @@ pub fn statxToStat(sx: linux.Statx) Stat {
     st.st_blksize = @intCast(sx.blksize);
 
     // dev/rdev: statx splits these into major/minor pairs.
-    // Recombine with the standard makedev formula: (major << 8) | minor.
-    // This matches the glibc/musl makedev() for basic device numbers.
-    st.st_dev = (sx.dev_minor & 0xff) | (@as(u64, sx.dev_major) << 8) | (@as(u64, sx.dev_minor & ~@as(u32, 0xff)) << 12);
-    st.st_rdev = (@as(u64, sx.rdev_major) << 8) | sx.rdev_minor;
+    // Recombine using the full Linux makedev encoding (linux/kdev_t.h):
+    //   (minor & 0xff) | (major & 0xfff) << 8 | (minor & ~0xff) << 12 | (major & ~0xfff) << 32
+    st.st_dev = makedev(sx.dev_major, sx.dev_minor);
+    st.st_rdev = makedev(sx.rdev_major, sx.rdev_minor);
 
     return st;
 }

@@ -30,10 +30,12 @@ const Stat = @import("../../types.zig").Stat;
 const proc_info = @import("../../deps/deps.zig").proc_info;
 
 fn makeFstatNotif(tid: AbsTid, vfd: i32, statbuf: *Stat) linux.SECCOMP.notif {
-    return makeNotif(.fstat, .{
+    return makeNotif(.fstatat64, .{
         .pid = tid,
-        .arg0 = @as(u64, @bitCast(@as(i64, vfd))),
-        .arg1 = @intFromPtr(statbuf),
+        .arg0 = @as(u64, @bitCast(@as(i64, vfd))), // dirfd
+        .arg1 = @intFromPtr(@as([*:0]const u8, "")), // empty pathname
+        .arg2 = @intFromPtr(statbuf), // statbuf
+        .arg3 = 0x1000, // AT_EMPTY_PATH
     });
 }
 

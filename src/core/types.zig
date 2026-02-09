@@ -126,6 +126,9 @@ pub const Stat = extern struct {
     __unused5: u32,
 
     comptime {
+        // aarch64-specific, for now
+        if (builtin.cpu.arch != .aarch64)
+            @compileError("Stat layout is aarch64-specific; add a definition for " ++ @tagName(builtin.cpu.arch));
         // Kernel ABI requires exactly 128 bytes on aarch64.
         std.debug.assert(@sizeOf(Stat) == 128);
     }
