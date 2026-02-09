@@ -46,22 +46,22 @@ pub fn len(self: *Self, io: Io) usize {
 }
 
 /// Drain buffer to a file.
-pub fn flush(self: *Self, io: Io, file: File) void {
+pub fn flush(self: *Self, io: Io, file: File) !void {
     self.mutex.lockUncancelable(io);
     defer self.mutex.unlock(io);
     const data = self.backing.written();
     if (data.len > 0) {
-        writeToFile(file, io, data);
+        try writeToFile(file, io, data);
         self.backing.clearRetainingCapacity();
     }
 }
 
-fn writeToFile(file: File, io: Io, data: []const u8) void {
+fn writeToFile(file: File, io: Io, data: []const u8) !void {
     if (comptime builtin.is_test) return;
     var buf: [4096]u8 = undefined;
     var w = file.writerStreaming(io, &buf);
-    w.interface.writeAll(data) catch {};
-    w.interface.flush() catch {};
+    try w.interface.writeAll(data);
+    try w.interface.flush();
 }
 
 test "write and read" {

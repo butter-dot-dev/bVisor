@@ -58,6 +58,6 @@ pub fn main() !void {
     defer stderr.deinit();
 
     try execute(setup.generateUid(), smokeTest, &stdout, &stderr);
-    stdout.flush(io, File.stdout());
-    stderr.flush(io, File.stderr());
+    try stdout.flush(io, File.stdout());
+    try stderr.flush(io, File.stderr());
 }
