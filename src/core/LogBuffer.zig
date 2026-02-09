@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 const Io = std.Io;
@@ -49,7 +50,16 @@ pub fn flush(self: *Self, io: Io, file: File) void {
     self.mutex.lockUncancelable(io);
     defer self.mutex.unlock(io);
     const data = self.backing.written();
-    var w = file.writerStreaming(io, &data);
+    if (data.len > 0) {
+        writeToFile(file, io, data);
+        self.backing.clearRetainingCapacity();
+    }
+}
+
+fn writeToFile(file: File, io: Io, data: []const u8) void {
+    if (comptime builtin.is_test) return;
+    var buf: [4096]u8 = undefined;
+    var w = file.writerStreaming(io, &buf);
     w.interface.writeAll(data) catch {};
     w.interface.flush() catch {};
 }

@@ -3,6 +3,8 @@ const types = @import("types.zig"); // ERIK TODO: kitchen sink utils, think abou
 const Logger = types.Logger;
 const LogBuffer = @import("LogBuffer.zig");
 const setup = @import("setup.zig");
+const Io = std.Io;
+const File = Io.File;
 const execute = setup.execute;
 const smokeTest = @import("smoke_test.zig").smokeTest;
 
@@ -46,10 +48,16 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
+    var threaded: std.Io.Threaded = .init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
     var stdout = LogBuffer.init(allocator);
     var stderr = LogBuffer.init(allocator);
     defer stdout.deinit();
     defer stderr.deinit();
 
     try execute(setup.generateUid(), smokeTest, &stdout, &stderr);
+    stdout.flush(io, File.stdout());
+    stderr.flush(io, File.stderr());
 }

@@ -30,7 +30,7 @@ pub fn next(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_val
         std.log.err("streamNext failed: {s}", .{@errorName(err)});
         return null;
     };
-    defer napi.allocator.free(data);
+    defer napi.allocator.free(data); // free the data after it's been returned as a JS-managed Uint8Array
     if (data.len == 0) return null;
     return napi.createUint8Array(env, data.ptr, data.len) catch return null;
 }
