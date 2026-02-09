@@ -27,6 +27,7 @@ pub const Passthrough = struct {
         _ = std.posix.system.close(self.fd);
     }
 
+<<<<<<< Updated upstream
     pub fn statx(self: *Passthrough) !linux.Statx {
         var statx_buf: linux.Statx = std.mem.zeroes(linux.Statx);
         const rc = linux.statx(
@@ -57,6 +58,12 @@ pub const Passthrough = struct {
         );
         if (linux.errno(rc) != .SUCCESS) return error.StatxFail;
         return statx_buf;
+=======
+    pub fn lseek(self: *Passthrough, offset: i64, whence: u32) !i64 {
+        const result = linux.lseek(self.fd, offset, @intCast(whence));
+        if (linux.errno(result) != .SUCCESS) return error.SyscallFailed;
+        return @intCast(result);
+>>>>>>> Stashed changes
     }
 };
 

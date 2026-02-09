@@ -72,7 +72,7 @@ Isolation is achieved via a copy-on-write overlay on top of the host filesystem.
 - [x] `openat` with path-based allow/block rules
 - [x] COW (copy-on-write) layer for write operations
 - [x] Storage backend for COW (plans for /tmp, local, s3)
-- [ ] FD operations (`dup`, `lseek`, `fstat`, `fcntl`) - note: `read`, `write`, `close` are implemented
+- [ ] FD operations (`lseek`, `fcntl`) - note: `read`, `write`, `close`, `dup`, `fstat`, are implemented
 - [ ] Directory operations (`getcwd`, `chdir`, `mkdirat`, `unlinkat`, `getdents64`)
 
 #### 3. Network Isolation - *not started*

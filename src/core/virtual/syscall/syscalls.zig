@@ -22,6 +22,7 @@ const dup = @import("handlers/dup.zig");
 const dup3 = @import("handlers/dup3.zig");
 const fstat = @import("handlers/fstat.zig");
 const fstatat64 = @import("handlers/fstatat64.zig");
+const lseek = @import("handlers/lseek.zig");
 
 pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
     const sys: linux.SYS = @enumFromInt(notif.data.nr);
@@ -39,6 +40,7 @@ pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.
         .dup3 => dup3.handle(notif, supervisor),
         .fstat => fstat.handle(notif, supervisor),
         .fstatat64 => fstatat64.handle(notif, supervisor),
+        .lseek => lseek.handle(notif, supervisor),
         // Implemented - process
         .getpid => getpid.handle(notif, supervisor),
         .getppid => getppid.handle(notif, supervisor),
@@ -58,7 +60,6 @@ pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.
         .fcntl,
         .ioctl,
         .pipe2,
-        .lseek,
         .getcwd,
         .chdir,
         .fchdir,

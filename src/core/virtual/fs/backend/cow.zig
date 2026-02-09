@@ -56,6 +56,7 @@ pub const Cow = union(enum) {
         }
     }
 
+<<<<<<< Updated upstream
     pub fn statx(self: *Cow) !linux.Statx {
         var statx_buf: linux.Statx = std.mem.zeroes(linux.Statx);
 
@@ -97,6 +98,15 @@ pub const Cow = union(enum) {
         );
         if (linux.errno(rc) != .SUCCESS) return error.StatxFail;
         return statx_buf;
+=======
+    pub fn lseek(self: *Cow, offset: i64, whence: u32) !i64 {
+        const fd = switch (self.*) {
+            inline else => |fd| fd,
+        };
+        const result = linux.lseek(fd, offset, @intCast(whence));
+        if (linux.errno(result) != .SUCCESS) return error.SyscallFailed;
+        return @intCast(result);
+>>>>>>> Stashed changes
     }
 };
 
