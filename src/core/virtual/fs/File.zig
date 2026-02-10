@@ -28,6 +28,7 @@ const Self = @This();
 backend: Backend,
 allocator: std.mem.Allocator,
 ref_count: AtomicUsize = undefined,
+opened_path: ?[]u8 = null,
 
 pub fn init(allocator: std.mem.Allocator, backend: Backend) !*Self {
     const self = try allocator.create(Self);
@@ -54,8 +55,15 @@ pub fn unref(self: *Self) void {
 }
 
 fn deinit(self: *Self) void {
+    if (self.opened_path) |p| self.allocator.free(p);
     self.close();
     self.allocator.destroy(self);
+}
+
+/// Store the normalized path this file was opened at
+pub fn setOpenedPath(self: *Self, path: ?[]const u8) !void {
+    if (self.opened_path) |old| self.allocator.free(old);
+    self.opened_path = if (path) |p| try self.allocator.dupe(u8, p) else null;
 }
 
 pub fn read(self: *Self, buf: []u8) !usize {

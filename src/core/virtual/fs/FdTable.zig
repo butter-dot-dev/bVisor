@@ -67,6 +67,7 @@ pub fn clone(self: *Self, allocator: Allocator) !*Self {
     while (iter.next()) |entry| {
         const old_entry = entry.value_ptr.*;
         const file_copy = try File.init(allocator, old_entry.file.backend);
+        try file_copy.setOpenedPath(old_entry.file.opened_path);
         try new_open_files.put(self.allocator, entry.key_ptr.*, FdEntry{
             .file = file_copy,
             .cloexec = old_entry.cloexec,

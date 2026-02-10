@@ -6,6 +6,14 @@ pub const RouteResult = union(enum) {
     handle: FileBackendType,
 };
 
+pub const ResolvedRouteResult = union(enum) {
+    block: void,
+    handle: struct {
+        backend: FileBackendType,
+        normalized: []const u8, // points into caller's resolve_buf
+    },
+};
+
 pub fn route(path: []const u8) !RouteResult {
     // normalize ".." out of path
     var buf: [512]u8 = undefined;
@@ -70,6 +78,26 @@ const router_rules: []const Rule = &.{
         .default = .{ .handle = .tmp },
     } } },
 };
+
+/// Resolve a path against a cwd (handling relative & absolute paths)
+/// Normalize any ".."
+/// Route through access rules.
+/// Caller provides the backing buffer
+pub fn resolveAndRoute(cwd: []const u8, path: []const u8, resolve_buf: *[512]u8) !ResolvedRouteResult {
+    var fba = std.heap.FixedBufferAllocator.init(resolve_buf);
+    const normalized = try std.fs.path.resolvePosix(fba.allocator(), &.{ cwd, path });
+
+    // Route the normalized path to check access rules
+    const route_result = try route(normalized);
+
+    return switch (route_result) {
+        .block => .block,
+        .handle => |backend| .{ .handle = .{
+            .backend = backend,
+            .normalized = normalized,
+        } },
+    };
+}
 
 const Node = union(enum) {
     terminal: RouteResult,

@@ -11,7 +11,7 @@ const Self = @This();
 ref_count: AtomicUsize = undefined,
 allocator: Allocator,
 cwd: []u8,
-umask: u32,
+umask: u32, // TODO: implement umask virtualization, might intercept guest process's umask() calls and track mutations to it accordingly
 root: []u8,
 
 pub fn init(allocator: Allocator) !*Self {
@@ -28,7 +28,7 @@ pub fn init(allocator: Allocator) !*Self {
         .ref_count = AtomicUsize.init(1),
         .allocator = allocator,
         .cwd = cwd,
-        .umask = 0o022,
+        .umask = 0o022, // default: removes write privileges for group and others
         .root = root,
     };
     return self;

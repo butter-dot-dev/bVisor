@@ -21,7 +21,6 @@ const AT_EMPTY_PATH: u32 = 0x1000;
 // fstatat64(dirfd, pathname, statbuf, flags)
 //   Mode 1: AT_EMPTY_PATH + empty pathname → equivalent to fstat(dirfd)
 //   Mode 2: Non-empty pathname → stat by path (no file opened)
-// TODO: relative paths (dirfd-relative)
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
     const logger = supervisor.logger;
 
@@ -52,6 +51,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
             supervisor.mutex.lockUncancelable(supervisor.io);
             defer supervisor.mutex.unlock(supervisor.io);
 
+            // Get caller Thread
             const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
                 std.log.err("fstatat64: Thread not found with tid={d}: {}", .{ caller_tid, err });
                 return replyContinue(notif.id);
@@ -74,15 +74,30 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     }
 
     // path-based stat
-    // TODO: Only absolute paths supported for now
-    if (path.len == 0 or path[0] != '/') {
-        logger.log("fstatat64: path must be absolute: {s}", .{path});
+    if (path.len == 0) {
         return replyErr(notif.id, .INVAL);
     }
 
-    const route_result = path_router.route(path) catch {
-        logger.log("fstatat64: path normalization failed: {s}", .{path});
-        return replyErr(notif.id, .INVAL);
+    // Get caller's cwd for relative path resolution (copy to stack, release lock)
+    var cwd_buf: [512]u8 = undefined;
+    const cwd: []const u8 = blk: {
+        supervisor.mutex.lockUncancelable(supervisor.io);
+        defer supervisor.mutex.unlock(supervisor.io);
+
+        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
+            logger.log("fstatat64: Thread not found for tid={d}: {}", .{ caller_tid, err });
+            return replyErr(notif.id, .SRCH);
+        };
+
+        const c = caller.fs_info.cwd;
+        @memcpy(cwd_buf[0..c.len], c);
+        break :blk cwd_buf[0..c.len];
+    };
+
+    // Resolve path against cwd and route through access rules
+    var resolve_buf: [512]u8 = undefined;
+    const route_result = path_router.resolveAndRoute(cwd, path, &resolve_buf) catch {
+        return replyErr(notif.id, .NAMETOOLONG);
     };
 
     switch (route_result) {
@@ -90,11 +105,11 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
             logger.log("fstatat64: blocked path: {s}", .{path});
             return replyErr(notif.id, .PERM);
         },
-        .handle => |backend| {
+        .handle => |h| {
             // Note all are lock-free (independent of internal Supervisor state) except for proc
             // For proc, sync Threads and get caller
             var caller: ?*Thread = null;
-            if (backend == .proc) {
+            if (h.backend == .proc) {
                 supervisor.mutex.lockUncancelable(supervisor.io);
                 defer supervisor.mutex.unlock(supervisor.io);
 
@@ -109,8 +124,8 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
                 };
             }
 
-            const statx_buf = File.statxByPath(backend, &supervisor.overlay, path, caller) catch |err| {
-                logger.log("fstatat64: statx failed for {s}: {s}", .{ path, @errorName(err) });
+            const statx_buf = File.statxByPath(h.backend, &supervisor.overlay, h.normalized, caller) catch |err| {
+                logger.log("fstatat64: statx failed for {s}: {s}", .{ h.normalized, @errorName(err) });
                 return replyErr(notif.id, if (err == error.FileNotFound) .NOENT else .IO);
             };
 
@@ -126,4 +141,148 @@ fn writeStatResponse(notif: linux.SECCOMP.notif, statx_buf: linux.Statx, statbuf
         return replyErr(notif.id, .FAULT);
     };
     return replySuccess(notif.id, 0);
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+const testing = std.testing;
+const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
+const isError = @import("../../../seccomp/notif.zig").isError;
+const LogBuffer = @import("../../../LogBuffer.zig");
+const generateUid = @import("../../../setup.zig").generateUid;
+const Stat = @import("../../../types.zig").Stat;
+
+test "fstatat64 path-based /proc/self succeeds" {
+    const allocator = testing.allocator;
+    const init_tid: AbsTid = 100;
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    defer supervisor.deinit();
+
+    var stat_result: Stat = undefined;
+    const notif = makeNotif(.fstatat64, .{
+        .pid = init_tid,
+        .arg0 = @bitCast(@as(i64, linux.AT.FDCWD)),
+        .arg1 = @intFromPtr(@as([*:0]const u8, "/proc/self")),
+        .arg2 = @intFromPtr(&stat_result),
+        .arg3 = @as(u64, 0),
+    });
+    const resp = handle(notif, &supervisor);
+
+    try testing.expect(!isError(resp));
+    try testing.expectEqual(@as(i64, 0), resp.val);
+}
+
+test "fstatat64 blocked path /sys returns EPERM" {
+    const allocator = testing.allocator;
+    const init_tid: AbsTid = 100;
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    defer supervisor.deinit();
+
+    var stat_result: Stat = undefined;
+    const notif = makeNotif(.fstatat64, .{
+        .pid = init_tid,
+        .arg0 = @bitCast(@as(i64, linux.AT.FDCWD)),
+        .arg1 = @intFromPtr(@as([*:0]const u8, "/sys/class")),
+        .arg2 = @intFromPtr(&stat_result),
+        .arg3 = @as(u64, 0),
+    });
+    const resp = handle(notif, &supervisor);
+
+    try testing.expect(isError(resp));
+    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.PERM))), resp.@"error");
+}
+
+test "fstatat64 empty path without AT_EMPTY_PATH returns EINVAL" {
+    const allocator = testing.allocator;
+    const init_tid: AbsTid = 100;
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    defer supervisor.deinit();
+
+    var stat_result: Stat = undefined;
+    const notif = makeNotif(.fstatat64, .{
+        .pid = init_tid,
+        .arg0 = @bitCast(@as(i64, linux.AT.FDCWD)),
+        .arg1 = @intFromPtr(@as([*:0]const u8, "")),
+        .arg2 = @intFromPtr(&stat_result),
+        .arg3 = @as(u64, 0), // no AT_EMPTY_PATH
+    });
+    const resp = handle(notif, &supervisor);
+
+    try testing.expect(isError(resp));
+    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.INVAL))), resp.@"error");
+}
+
+test "fstatat64 unknown tid returns ESRCH" {
+    const allocator = testing.allocator;
+    const init_tid: AbsTid = 100;
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    defer supervisor.deinit();
+
+    var stat_result: Stat = undefined;
+    const notif = makeNotif(.fstatat64, .{
+        .pid = 999,
+        .arg0 = @bitCast(@as(i64, linux.AT.FDCWD)),
+        .arg1 = @intFromPtr(@as([*:0]const u8, "/proc/self")),
+        .arg2 = @intFromPtr(&stat_result),
+        .arg3 = @as(u64, 0),
+    });
+    const resp = handle(notif, &supervisor);
+
+    try testing.expect(isError(resp));
+    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+}
+
+test "fstatat64 AT_EMPTY_PATH with proc fd succeeds" {
+    const allocator = testing.allocator;
+    const init_tid: AbsTid = 100;
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    defer supervisor.deinit();
+
+    // Manually insert a ProcFile into the fd table
+    const thread = supervisor.guest_threads.lookup.get(init_tid).?;
+    var proc_content: [256]u8 = undefined;
+    @memcpy(proc_content[0..4], "100\n");
+    const file = try File.init(allocator, .{ .proc = .{
+        .content = proc_content,
+        .content_len = 4,
+        .offset = 0,
+    } });
+    const vfd = try thread.fd_table.insert(file, .{});
+
+    var stat_result: Stat = undefined;
+    const notif = makeNotif(.fstatat64, .{
+        .pid = init_tid,
+        .arg0 = @as(u64, @intCast(vfd)),
+        .arg1 = @intFromPtr(@as([*:0]const u8, "")),
+        .arg2 = @intFromPtr(&stat_result),
+        .arg3 = AT_EMPTY_PATH,
+    });
+    const resp = handle(notif, &supervisor);
+
+    try testing.expect(!isError(resp));
+    try testing.expectEqual(@as(i64, 0), resp.val);
+    // ProcFile statx returns S_IFREG | 0o444
+    try testing.expect(stat_result.st_mode & linux.S.IFMT == linux.S.IFREG);
 }

@@ -25,6 +25,9 @@ const fstatat64 = @import("handlers/fstatat64.zig");
 const uname = @import("handlers/uname.zig");
 const sysinfo = @import("handlers/sysinfo.zig");
 const lseek = @import("handlers/lseek.zig");
+const getcwd = @import("handlers/getcwd.zig");
+const chdir = @import("handlers/chdir.zig");
+const fchdir = @import("handlers/fchdir.zig");
 
 pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
     const sys: linux.SYS = @enumFromInt(notif.data.nr);
@@ -45,6 +48,9 @@ pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.
         .uname => uname.handle(notif, supervisor), // leaks kernel version, hostname
         .sysinfo => sysinfo.handle(notif, supervisor), // leaks total RAM, uptime, load
         .lseek => lseek.handle(notif, supervisor),
+        .getcwd => getcwd.handle(notif, supervisor),
+        .chdir => chdir.handle(notif, supervisor),
+        .fchdir => fchdir.handle(notif, supervisor),
         // Implemented - process
         .getpid => getpid.handle(notif, supervisor),
         .getppid => getppid.handle(notif, supervisor),
@@ -64,9 +70,6 @@ pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.
         .fcntl,
         .ioctl,
         .pipe2,
-        .getcwd,
-        .chdir,
-        .fchdir,
         .getdents64,
         .faccessat,
         // To implement - process
