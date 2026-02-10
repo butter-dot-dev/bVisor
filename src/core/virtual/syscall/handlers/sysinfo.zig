@@ -42,7 +42,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         info.procs = @intCast(@min(supervisor.guest_threads.lookup.count(), std.math.maxInt(u16)));
         const now = Io.Clock.awake.now(supervisor.io) catch |err| {
             logger.log("sysinfo: failed to get current timestamp: {}", .{err});
-            return replyErr(notif.id, .BADF);
+            return replyErr(notif.id, .INVAL);
         };
         info.uptime = supervisor.start_time.durationTo(now).toSeconds();
     }
