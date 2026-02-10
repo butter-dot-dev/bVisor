@@ -18,6 +18,7 @@ allocator: Allocator,
 io: Io,
 init_guest_tid: linux.pid_t,
 notify_fd: linux.fd_t,
+start_time: Io.Timestamp,
 logger: Logger,
 
 // All Thread-s starting from the initial guest Thread are assigned a virtual TID and tracked via guest_threads
@@ -52,6 +53,7 @@ pub fn init(allocator: Allocator, io: Io, uid: [16]u8, notify_fd: linux.fd_t, in
         .stderr = stderr,
         .init_guest_tid = init_guest_tid,
         .notify_fd = notify_fd,
+        .start_time = try Io.Clock.awake.now(io),
         .logger = logger,
         .guest_threads = guest_threads,
         .overlay = overlay,
