@@ -22,6 +22,8 @@ const dup = @import("handlers/dup.zig");
 const dup3 = @import("handlers/dup3.zig");
 const fstat = @import("handlers/fstat.zig");
 const fstatat64 = @import("handlers/fstatat64.zig");
+const uname = @import("handlers/uname.zig");
+const sysinfo = @import("handlers/sysinfo.zig");
 
 pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
     const sys: linux.SYS = @enumFromInt(notif.data.nr);

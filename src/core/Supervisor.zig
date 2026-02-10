@@ -18,6 +18,7 @@ allocator: Allocator,
 io: Io,
 init_guest_tid: linux.pid_t,
 notify_fd: linux.fd_t,
+start_time: i64,
 logger: Logger,
 
 // All Thread-s starting from the initial guest Thread are assigned a virtual TID and tracked via guest_threads
@@ -50,6 +51,7 @@ pub fn init(allocator: Allocator, io: Io, notify_fd: linux.fd_t, init_guest_tid:
         .log_buffer = .init(allocator),
         .init_guest_tid = init_guest_tid,
         .notify_fd = notify_fd,
+        .start_time = std.time.timestamp(),
         .logger = logger,
         .guest_threads = guest_threads,
         .overlay = overlay,
