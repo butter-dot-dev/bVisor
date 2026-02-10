@@ -14,6 +14,7 @@ test {
     _ = @import("deps/proc_info/impl/linux.zig");
     _ = @import("virtual/proc/Threads.zig");
     _ = @import("virtual/fs/FdTable.zig");
+    _ = @import("virtual/fs/FsInfo.zig");
     _ = @import("virtual/path.zig");
     _ = @import("virtual/fs/backend/procfile.zig");
     _ = @import("virtual/fs/backend/cow.zig");

@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 const Namespace = @import("Namespace.zig");
 const ThreadGroup = @import("ThreadGroup.zig");
 const FdTable = @import("../fs/FdTable.zig");
+const FsInfo = @import("../fs/FsInfo.zig");
 
 // Thread IDs
 pub const AbsTid = linux.pid_t;
@@ -18,12 +19,17 @@ tid: AbsTid,
 thread_group: *ThreadGroup,
 namespace: *Namespace,
 fd_table: *FdTable,
+fs_info: *FsInfo,
 parent: ?*Self,
 
-pub fn init(allocator: Allocator, tid: AbsTid, thread_group: ?*ThreadGroup, namespace: ?*Namespace, fd_table: ?*FdTable, parent: ?*Self) !*Self {
+pub fn init(allocator: Allocator, tid: AbsTid, thread_group: ?*ThreadGroup, namespace: ?*Namespace, fd_table: ?*FdTable, fs_info: ?*FsInfo, parent: ?*Self) !*Self {
     // Create or use provided fd_table
     const fdt = fd_table orelse try FdTable.init(allocator);
     errdefer if (fd_table == null) fdt.unref();
+
+    // Create or use provided fs_info
+    const fsi = fs_info orelse try FsInfo.init(allocator);
+    errdefer if (fs_info == null) fsi.unref();
 
     var thread_group_acquired: *ThreadGroup = undefined;
     var namespace_acquired: *Namespace = undefined;
@@ -67,6 +73,7 @@ pub fn init(allocator: Allocator, tid: AbsTid, thread_group: ?*ThreadGroup, name
         .thread_group = thread_group_acquired,
         .namespace = namespace_acquired,
         .fd_table = fdt,
+        .fs_info = fsi,
         .parent = parent,
     };
 
@@ -106,6 +113,7 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
     self.thread_group.unref();
     self.namespace.unref();
     self.fd_table.unref();
+    self.fs_info.unref();
 
     allocator.destroy(self);
 }
@@ -120,13 +128,14 @@ pub fn getNamespaceRoot(self: *Self) *Self {
     return current;
 }
 
-pub fn initChild(self: *Self, allocator: Allocator, tid: AbsTid, namespace: ?*Namespace, fd_table: ?*FdTable) !*Self {
+pub fn initChild(self: *Self, allocator: Allocator, tid: AbsTid, namespace: ?*Namespace, fd_table: ?*FdTable, fs_info: ?*FsInfo) !*Self {
     return Self.init(
         allocator,
         tid,
         null,
         namespace,
         fd_table,
+        fs_info,
         self,
     );
 }

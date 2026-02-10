@@ -22,6 +22,7 @@ pub const NsTgid = Thread.NsTgid;
 pub const ThreadGroup = @import("ThreadGroup.zig");
 pub const Namespace = @import("Namespace.zig");
 pub const FdTable = @import("../fs/FdTable.zig");
+pub const FsInfo = @import("../fs/FsInfo.zig");
 pub const ThreadStatus = @import("ThreadStatus.zig");
 
 const ThreadLookup = std.AutoHashMapUnmanaged(AbsTid, *Thread);
@@ -56,6 +57,10 @@ pub const CloneFlags = struct {
 
     pub fn shareFiles(self: CloneFlags) bool {
         return self.raw & linux.CLONE.FILES != 0;
+    }
+
+    pub fn shareFs(self: CloneFlags) bool {
+        return self.raw & linux.CLONE.FS != 0;
     }
 };
 
@@ -183,10 +188,11 @@ pub fn syncNewThreads(self: *Self) !void {
 pub fn handleInitialThread(self: *Self, tid: AbsTid) !void {
     if (self.lookup.count() != 0) return error.InitialThreadExists;
 
-    // Passing null thread_group/namespace/fd_table creates new ones
+    // Passing null thread_group/namespace/fd_table/fs_info creates new ones
     const root_thread = try Thread.init(
         self.allocator,
         tid,
+        null,
         null,
         null,
         null,
@@ -219,7 +225,20 @@ pub fn registerChild(
         try parent.fd_table.clone(self.allocator);
     errdefer fd_table.unref();
 
-    const child = try parent.initChild(self.allocator, child_tid, namespace, fd_table);
+    // CLONE_FS shares the FsInfo; otherwise clone it
+    const fs_info: *FsInfo = if (clone_flags.shareFs())
+        parent.fs_info.ref()
+    else
+        try parent.fs_info.clone(self.allocator);
+    errdefer fs_info.unref();
+
+    const child = try parent.initChild(
+        self.allocator,
+        child_tid,
+        namespace,
+        fd_table,
+        fs_info,
+    );
     errdefer child.deinit(self.allocator);
 
     try self.lookup.put(self.allocator, child_tid, child);
