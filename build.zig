@@ -45,7 +45,7 @@ pub fn build(b: *std.Build) void {
             .name = "libbvisor",
             .linkage = .dynamic,
             .root_module = b.createModule(.{
-                .root_source_file = b.path("src/sdks/node/zig/lib.zig"),
+                .root_source_file = b.path("src/sdks/node/zig/root.zig"),
                 .target = target,
                 .optimize = optimize,
                 .link_libc = true,
