@@ -8,6 +8,7 @@ const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
 const statxToStat = File.statxToStat;
 const path_router = @import("../../path.zig");
+const resolveAndRoute = path_router.resolveAndRoute;
 
 const replyContinue = @import("../../../seccomp/notif.zig").replyContinue;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
@@ -96,7 +97,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
     // Resolve path against cwd and route through access rules
     var resolve_buf: [512]u8 = undefined;
-    const route_result = path_router.resolveAndRoute(cwd, path, &resolve_buf) catch {
+    const route_result = resolveAndRoute(cwd, path, &resolve_buf) catch {
         return replyErr(notif.id, .NAMETOOLONG);
     };
 
