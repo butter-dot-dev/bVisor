@@ -12,27 +12,27 @@
         "typescript": "^5.0.0",
       },
       "optionalDependencies": {
-        "@bvisor/linux-arm64-gnu": "0.0.1",
-        "@bvisor/linux-arm64-musl": "0.0.1",
-        "@bvisor/linux-x64-gnu": "0.0.1",
-        "@bvisor/linux-x64-musl": "0.0.1",
+        "@bvisor/linux-arm64-gnu": "workspace:*",
+        "@bvisor/linux-arm64-musl": "workspace:*",
+        "@bvisor/linux-x64-gnu": "workspace:*",
+        "@bvisor/linux-x64-musl": "workspace:*",
       },
     },
     "platforms/linux-arm64-gnu": {
       "name": "@bvisor/linux-arm64-gnu",
-      "version": "0.0.1",
+      "version": "0.0.2",
     },
     "platforms/linux-arm64-musl": {
       "name": "@bvisor/linux-arm64-musl",
-      "version": "0.0.1",
+      "version": "0.0.2",
     },
     "platforms/linux-x64-gnu": {
       "name": "@bvisor/linux-x64-gnu",
-      "version": "0.0.1",
+      "version": "0.0.2",
     },
     "platforms/linux-x64-musl": {
       "name": "@bvisor/linux-x64-musl",
-      "version": "0.0.1",
+      "version": "0.0.2",
     },
   },
   "packages": {

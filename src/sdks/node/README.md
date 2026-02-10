@@ -16,3 +16,12 @@ npm run dev
 npm run test:published
 ```
 
+## Publishing
+
+Bump versions across all packages, then publish:
+
+```bash
+bun run version:patch
+bun publish --access public
+```
+
