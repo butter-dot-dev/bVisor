@@ -1,144 +1,155 @@
-### bVisor is an in-process linux sandbox.
+### bVisor is a lightweight local Linux sandbox.
 
-bVisor is an SDK and runtime for securely running Linux sandboxes, locally.
+bVisor is an SDK and runtime for securely running Linux workloads on your local machine.
 
-Inspired by [gVisor](https://github.com/google/gVisor), bVisor runs workloads directly on the host machine, providing isolation by intercepting and virtualizing [linux syscalls](https://en.wikipedia.org/wiki/System_call) from userspace, allowing for secure and isolated I/O without the overhead of a virtual machine or remote infra.
+Inspired by [gVisor](https://github.com/google/gVisor), bVisor runs programs directly on the host machine, providing isolation by intercepting and virtualizing [Linux syscalls](https://en.wikipedia.org/wiki/System_call) from userspace, allowing for secure and isolated I/O without the overhead of a virtual machine or remote infra.
 
 Unlike gVisor, bVisor is built to run directly in your application, spinning up and tearing down sandboxes in milliseconds. This makes it ideal for ephemeral tasks commonly performed by LLM agents, such as code execution or filesystem operations.
 
-It is currently a proof-of-concept, and not something you'd be able to easily use yet. But soon!
+## Usage
 
-## Architecture
-
-bVisor is built on [Seccomp user notifier](https://man7.org/linux/man-pages/man2/seccomp.2.html), a Linux kernel feature that allows userspace processes to intercept and optionally handle syscalls from a child process. This allows bVisor to block or mock the kernel API (such as filesystem read/write, network access, etc.) to ensure the child process remains sandboxed. 
-
-Other than the overhead of syscall emulation, child processes run natively.
-
-### Goal
-
-bVisor will be ~complete once it can embed into higher-level languages, such as into Python or TypeScript, as an alternative "bash" subprocess runner.
-
-For example, embedded into a Python SDK:
-```python
-from bvisor import Sandbox
-
-with Sandbox() as sb:
-    sb.bash("echo 'Hello, world!'")
-    sb.bash("ls /")  # serves virtual "/"
-    sb.bash("touch /tmp/test.txt")
-    sb.bash("curl https://www.google.com")
-    sb.bash("npm install")
-    sb.bash("sleep 5")
-
-    try:
-        sb.bash("chroot /tmp")  # blocked
-    except Exception as e:
-        pass  # as expected
+The bVisor sandbox runtime and TS/JS SDK can be installed via npm.
+```bash
+npm install bvisor
 ```
 
-Or similarly in TypeScript:
+Example usage:
 ```typescript
 import { Sandbox } from "bvisor";
 
-using sb = await Sandbox.create();
+const sb = new Sandbox();
+const output = sb.runCmd("echo 'Hello, world!'");
 
-await sb.bash("echo 'Hello, world!'");
-// etc ...
+console.log(await output.stdout());
 ```
 
-## Status
+This executes `echo 'Hello, world!'` inside a sandbox. Though for now, until bash is fully supported, bVisor ignores the command and runs a hardcoded smoke test instead.
 
-bVisor is an early proof-of-concept. Core syscall interception works via seccomp. Process isolation works via virtual namespaces. Now just working through the laundry list of misc syscalls.
+Filesystem operations are safely virtualized (copy-on-write):
+```typescript
+sb.runCmd("echo 'Hello, world!' > /tmp/test.txt"); // only visible from this sandbox
+```
 
-#### 1. Process Visibility Isolation - *in progress*
+Unsafe commands are blocked:
+```typescript
+sb.runCmd("chroot /tmp"); // error
+```
 
-Sandboxed processes can only see and signal other processes within the same namespace. Processes use real kernel PIDs, but namespace boundaries control visibility.
+Python SDK and CLI are also planned.
 
-- [x] Virtual namespaces with parent/child relationships.
-- [x] `kill` restricted to processes within namespace
-- [x] `/proc` reads filtered to visible processes only
-- [x] `clone`/`fork` inherit namespaces, mimicking real kernel behavior
-- [x] Per-process virtual FD tables
-- [ ] `wait4`/`waitid` for process reaping
-- [ ] `execve` for program execution
+## Architecture
 
-#### 2. Copy-on-Write Filesystem - *in progress*
+bVisor is built on [Seccomp user notifier](https://man7.org/linux/man-pages/man2/seccomp.2.html), a Linux kernel feature that allows userspace processes to intercept and optionally handle syscalls from a child process. This allows bVisor to block or mock the kernel API (such as filesystem read/write, network access, etc.) to ensure the child process remains sandboxed.
 
-bVisor is imageless, meaning it does not require a base image to run. It runs with direct visibility to the host filesystem. This allows system dependencies such as `npm` to work out of the box.
+Other than the overhead of syscall emulation, child processes run natively.
 
-Isolation is achieved via a copy-on-write overlay on top of the host filesystem. Files opened with write flags are copied to a sandbox-local directory. Read-only files are passed through to the real filesystem. 
+bVisor is imageless, meaning it does not require a base image to run. It runs with direct visibility to the host filesystem. This allows system dependencies such as `npm` to work out of the box. Isolation is achieved via a copy-on-write overlay on top of the host filesystem. Files opened with write flags are copied to a sandbox-local directory. Read-only files are passed through to the real filesystem.
 
-- [x] Path normalization (blocks `..` traversal attacks)
-- [x] `openat` with path-based allow/block rules
-- [x] COW (copy-on-write) layer for write operations
-- [x] Storage backend for COW (plans for /tmp, local, s3)
-- [ ] FD operations (`fcntl`) - note: `read`, `write`, `close`, `lseek`, `dup`, `fstat`, are implemented
-- [ ] Directory operations (`getcwd`, `chdir`, `mkdirat`, `unlinkat`, `getdents64`)
+## Syscall Support
 
-#### 3. Network Isolation - *not started*
+Every Linux syscall falls into one of four categories in bVisor:
 
-- [ ] Block or virtualize network syscalls
-- [ ] Optional allowlist for specific hosts/ports
+#### Virtualized
+Syscalls are intercepted and handled in userspace by the bVisor virtual kernel.
 
-#### 4. Resource Limits (cgroups) - *not started*
+| | Syscalls |
+|-|----------|
+| File I/O | `openat`, `close`, `read`, `write`, `readv`, `writev`, `lseek`, `dup`, `dup3` |
+| File metadata | `fstat`, `fstatat64` |
+| Process | `getpid`, `getppid`, `gettid`, `kill`, `tkill`, `exit`, `exit_group` |
+| System info | `uname`, `sysinfo` |
 
-- [ ] CPU/memory limits
-- [ ] I/O throttling
+Note that bVisor may still call into the underlying kernel to virtualize any given syscall.
 
-#### 5. Host Info Virtualization - *not started*
+#### Passthrough
+Syscalls are forwarded to the kernel unmodified. These syscalls are process-local or read-only and do not require any virtualization.
 
-Prevent leaking host system details in multi-tenant environments.
+| | Syscalls |
+|-|----------|
+| Process | `clone`, `wait4`, `waitid` |
+| Identity | `getuid`, `geteuid`, `getgid`, `getegid` |
+| Memory | `brk`, `mmap`, `mprotect`, `munmap`, `mremap`, `madvise` |
+| Signals | `rt_sigaction`, `rt_sigprocmask`, `rt_sigreturn`, `rt_sigsuspend`, `rt_sigpending`, `rt_sigtimedwait`, `sigaltstack`, `restart_syscall` |
+| Time | `clock_gettime`, `clock_getres`, `gettimeofday`, `nanosleep`, `clock_nanosleep` |
+| Sync | `futex`, `futex_wait`, `futex_wake`, `futex_requeue`, `futex_waitv`, `set_robust_list`, `rseq` |
+| Random | `getrandom` |
 
-- [ ] `uname` - kernel version, hostname
-- [ ] `sysinfo` - total RAM, uptime, load
-- [ ] `getrlimit` - resource configuration
-- [ ] `getrusage` - resource usage stats
+#### Blocked
+Syscalls are blocked and return `ENOSYS`. These could allow sandbox escape or privilege escalation.
 
-### Infrastructure
+| | Syscalls |
+|-|----------|
+| Privilege escalation | `ptrace`, `mount`, `umount2`, `chroot`, `pivot_root`, `reboot`, `setns`, `unshare`, `seccomp`, `bpf` |
+| Cross-process memory | `process_vm_readv`, `process_vm_writev` |
+| Kernel modules | `kexec_load`, `kexec_file_load`, `init_module`, `finit_module`, `delete_module` |
+| Resource control | `setrlimit`, `prlimit64` |
+| Execution domain | `personality` |
 
-**Core**
-- [x] Seccomp user notifier interception
-- [x] Supervisor/child process model
-- [x] BPF filter installation
-- [x] Cross-process memory access (`process_vm_readv`/`writev`)
-- [x] `writev` emulation (stdout/stderr capture)
+#### Roadmap
+Not yet handled but likely necessary for Bash compatibility. Currently return `ENOSYS`.
 
-**Blocked Dangerous Syscalls**
-- [x] `ptrace`, `mount`, `umount2`, `chroot`, `pivot_root`, `setns`, `unshare`, `seccomp`, `reboot`, `prlimit64`
+| | Syscalls |
+|-|----------|
+| File I/O | `fcntl`, `ioctl`, `pipe2` |
+| File metadata | `faccessat` |
+| Directory | `getcwd`, `chdir`, `fchdir`, `getdents64`, `mkdirat`, `unlinkat` |
+| Process | `execve`, `set_tid_address` |
+| System info | `getrlimit`, `getrusage` |
+| Networking | not started |
+| Resource limits | not started (cgroups) |
 
-**Passthrough** (kernel handles directly)
-- [x] Memory: `brk`, `mmap`, `mprotect`, `munmap`
-- [x] Time: `clock_gettime`, `gettimeofday`, `nanosleep`
-- [x] Identity: `getuid`, `geteuid`, `getgid`, `getegid`
-- [x] Runtime: `getrandom`, `futex`
+<details>
+<summary>See full list of other unhandled syscalls (~240)</summary>
 
-### Platform Support
+| | Syscalls |
+|-|----------|
+| File I/O | `pread64`, `pwrite64`, `preadv`, `pwritev`, `preadv2`, `pwritev2`, `sendfile`, `splice`, `tee`, `vmsplice`, `readahead`, `copy_file_range` |
+| File metadata | `statx`, `statfs`, `fstatfs`, `readlinkat`, `utimensat`, `truncate`, `ftruncate`, `fallocate`, `fadvise64`, `flock`, `fchmod`, `fchmodat`, `fchmodat2`, `fchown`, `fchownat`, `faccessat2`, `cachestat` |
+| Directory | `mknodat`, `symlinkat`, `linkat`, `renameat`, `renameat2` |
+| Process | `execveat`, `clone3`, `tgkill`, `prctl`, `pidfd_open`, `pidfd_getfd`, `pidfd_send_signal`, `kcmp`, `userfaultfd` |
+| System info | `syslog`, `umask`, `getcpu`, `acct`, `vhangup`, `sethostname`, `setdomainname` |
+| Identity (write) | `setuid`, `setgid`, `setreuid`, `setregid`, `setresuid`, `getresuid`, `setresgid`, `getresgid`, `setfsuid`, `setfsgid`, `getgroups`, `setgroups`, `setpriority`, `getpriority` |
+| Session/pgid | `setpgid`, `getpgid`, `getsid`, `setsid` |
+| Memory | `msync`, `mlock`, `munlock`, `mlockall`, `munlockall`, `mincore`, `remap_file_pages`, `mbind`, `get_mempolicy`, `set_mempolicy`, `set_mempolicy_home_node`, `migrate_pages`, `move_pages`, `process_madvise`, `mlock2`, `memfd_create`, `memfd_secret`, `map_shadow_stack`, `pkey_mprotect`, `pkey_alloc`, `pkey_free`, `mseal`, `membarrier`, `process_mrelease` |
+| Signals | `rt_sigqueueinfo`, `rt_tgsigqueueinfo`, `signalfd4` |
+| Time | `clock_settime`, `clock_adjtime`, `settimeofday`, `adjtimex`, `getitimer`, `setitimer`, `times`, `timer_create`, `timer_gettime`, `timer_getoverrun`, `timer_settime`, `timer_delete`, `timerfd_create`, `timerfd_settime`, `timerfd_gettime` |
+| Networking | `socket`, `socketpair`, `bind`, `listen`, `accept`, `accept4`, `connect`, `getsockname`, `getpeername`, `sendto`, `recvfrom`, `setsockopt`, `getsockopt`, `shutdown`, `sendmsg`, `recvmsg`, `sendmmsg`, `recvmmsg` |
+| Polling/events | `epoll_create1`, `epoll_ctl`, `epoll_pwait`, `epoll_pwait2`, `pselect6`, `ppoll`, `eventfd2` |
+| File sync | `sync`, `fsync`, `fdatasync`, `sync_file_range`, `syncfs` |
+| File handles | `name_to_handle_at`, `open_by_handle_at`, `openat2`, `close_range` |
+| Async I/O | `io_setup`, `io_destroy`, `io_submit`, `io_cancel`, `io_getevents`, `io_pgetevents`, `io_uring_setup`, `io_uring_enter`, `io_uring_register` |
+| IPC | `mq_open`, `mq_unlink`, `mq_timedsend`, `mq_timedreceive`, `mq_notify`, `mq_getsetattr`, `msgget`, `msgctl`, `msgrcv`, `msgsnd`, `semget`, `semctl`, `semtimedop`, `semop`, `shmget`, `shmctl`, `shmat`, `shmdt` |
+| Extended attributes | `setxattr`, `lsetxattr`, `fsetxattr`, `getxattr`, `lgetxattr`, `fgetxattr`, `listxattr`, `llistxattr`, `flistxattr`, `removexattr`, `lremovexattr`, `fremovexattr`, `setxattrat`, `getxattrat`, `listxattrat`, `removexattrat` |
+| Scheduling | `sched_setparam`, `sched_setscheduler`, `sched_getscheduler`, `sched_getparam`, `sched_setaffinity`, `sched_getaffinity`, `sched_yield`, `sched_get_priority_max`, `sched_get_priority_min`, `sched_rr_get_interval`, `sched_setattr`, `sched_getattr` |
+| Capabilities | `capget`, `capset` |
+| Mount/namespace | `mount_setattr`, `move_mount`, `fsopen`, `fsconfig`, `fsmount`, `fspick`, `open_tree`, `open_tree_attr`, `statmount`, `listmount` |
+| Security | `landlock_create_ruleset`, `landlock_add_rule`, `landlock_restrict_self`, `lsm_get_self_attr`, `lsm_set_self_attr`, `lsm_list_modules` |
+| Keys | `add_key`, `request_key`, `keyctl` |
+| Inotify/fanotify | `inotify_init1`, `inotify_add_watch`, `inotify_rm_watch`, `fanotify_init`, `fanotify_mark` |
+| I/O priority | `ioprio_set`, `ioprio_get` |
+| Swap | `swapon`, `swapoff` |
+| Misc | `nfsservctl`, `quotactl`, `quotactl_fd`, `lookup_dcookie`, `perf_event_open`, `get_robust_list`, `file_getattr`, `file_setattr` |
 
-- [x] Linux (aarch64, x86_64)
-- [ ] macOS - requires alternative to seccomp (no equivalent exists)
+</details>
 
-### SDK
-
-- [ ] Compile runtime for distribution
-- [ ] Python bindings
-- [ ] TypeScript bindings
-
-## Development
+## Development Guide
 
 #### Zig
 bVisor is written in Zig. Zig is pre-1.0, so compilation is only guaranteed with the exact zig build. We're using a tagged commit on 0.16 dev, which includes major breaking changes (Io) compared to previous versions, so please use the exact version specified in the `build.zig.zon` file. It's also recommended to compile ZLS from source using a tagged commit compatible with Zig. You'll be flying blind otherwise.
 
 #### Cross-compilation
-bVisor depends on Linux kernel features, although it's developed primarily on ARM Macs and tested via Docker. The `build.zig` is currently configured to cross-compile aarch64-linux-musl, so running `zig build` will produce a binary in `zig-out/bin/bVisor` which will only run in a Linux container. Use `zig build run` to execute the binary in a container.
+bVisor depends on Linux kernel features, although it's developed primarily on ARM Macs.
 
-#### Testing
-There are three ways to test:
+Therefore, a compile-time dependency-injection pattern is used to swap in the appropriate implementation for the build target, allowing for tests to run on our development machines.
 
-**Native unit tests**
-- `zig build test` runs unit tests **on your Mac**. It's intended for quick correctness checks for anything behind the seccomp notification layer (syscall handlers, namespace isolation, virtual filesystem, etc). Prefer to use POSIX APIs over Linux where possible, to allow more tests to natively run on Mac. If POSIX APIs are not available, we can do comptime dependency injection (see `src/deps`) to use Mac-compatible mocks when running on Mac.
+Linux tests are supported via Docker.
 
-**Containerized unit tests**
-- `zig build test -Duse-docker` runs the same tests as `zig build test` but in a Linux container. This exercises the Linux deps in `src/deps`.
+```bash
+# Native
+zig build        # Cross-compile for all targets (exec, testing, N-API distribution)
+zig build test   # Unit tests on host (Mac-compatible via comptime DI)
 
-**E2E test in linux container**
-- `zig build run` runs the full executable in a Linux container, executing `smoke_test.zig` as a sandboxed guest process. It will print out a scorecard detailing which features are supported so far. The goal is to get it to 100%, and then to add more tests!
+# Testing using Docker
+zig build test -Duse-docker  # Unit tests in Docker (exercises real Linux deps)
+zig build run                # E2E smoke test in Docker (scorecard of supported syscalls)
+```
