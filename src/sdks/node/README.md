@@ -22,6 +22,5 @@ Bump versions across all packages, then publish:
 
 ```bash
 bun run version:patch
-bun publish --access public
+bun run publish:all
 ```
-
