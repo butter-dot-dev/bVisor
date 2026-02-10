@@ -6,6 +6,8 @@ const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
 const Supervisor = @import("../../../Supervisor.zig");
+const LogBuffer = @import("../../../LogBuffer.zig");
+const generateUid = @import("../../../setup.zig").generateUid;
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
 const replyErr = @import("../../../seccomp/notif.zig").replyErr;
@@ -89,7 +91,11 @@ const ProcFile = @import("../../fs/backend/procfile.zig").ProcFile;
 test "read from virtual file returns data" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     // Insert a proc file into the fd table (content "100\n")
@@ -115,7 +121,11 @@ test "read from virtual file returns data" {
 test "read count=5 from larger file returns at most 5 bytes" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
@@ -138,7 +148,11 @@ test "read count=5 from larger file returns at most 5 bytes" {
 test "read from FD 0 (stdin) returns replyContinue" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     var buf: [64]u8 = undefined;
@@ -156,7 +170,11 @@ test "read from FD 0 (stdin) returns replyContinue" {
 test "read count=0 returns 0" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
@@ -179,7 +197,11 @@ test "read count=0 returns 0" {
 test "read from non-existent VFD returns EBADF" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     var buf: [64]u8 = undefined;
@@ -198,7 +220,11 @@ test "read from non-existent VFD returns EBADF" {
 test "read with unknown caller PID returns ESRCH" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     var buf: [64]u8 = undefined;

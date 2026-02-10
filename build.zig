@@ -22,8 +22,10 @@ pub fn build(b: *std.Build) void {
     }{
         .{ .cpu_arch = .aarch64, .abi = .musl, .dest_dir = "../src/sdks/node/platforms/linux-arm64-musl" },
         .{ .cpu_arch = .aarch64, .abi = .gnu, .dest_dir = "../src/sdks/node/platforms/linux-arm64-gnu" },
-        .{ .cpu_arch = .x86_64, .abi = .musl, .dest_dir = "../src/sdks/node/platforms/linux-x64-musl" },
-        .{ .cpu_arch = .x86_64, .abi = .gnu, .dest_dir = "../src/sdks/node/platforms/linux-x64-gnu" },
+
+        // TODO: add x86_64 platforms
+        // .{ .cpu_arch = .x86_64, .abi = .musl, .dest_dir = "../src/sdks/node/platforms/linux-x64-musl" },
+        // .{ .cpu_arch = .x86_64, .abi = .gnu, .dest_dir = "../src/sdks/node/platforms/linux-x64-gnu" },
     };
 
     for (node_platforms) |platform| {
@@ -31,6 +33,12 @@ pub fn build(b: *std.Build) void {
             .cpu_arch = platform.cpu_arch,
             .os_tag = .linux,
             .abi = platform.abi,
+        });
+
+        const core_module = b.createModule(.{
+            .root_source_file = b.path("src/core/root.zig"),
+            .target = target,
+            .optimize = optimize,
         });
 
         const node_lib = b.addLibrary(.{
@@ -43,6 +51,7 @@ pub fn build(b: *std.Build) void {
                 .link_libc = true,
             }),
         });
+        node_lib.root_module.addImport("core", core_module);
         node_lib.root_module.addIncludePath(node_api.path("include"));
         node_lib.linker_allow_shlib_undefined = true;
 

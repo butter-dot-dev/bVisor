@@ -4,6 +4,8 @@ const posix = std.posix;
 const testing = std.testing;
 
 const Supervisor = @import("../../Supervisor.zig");
+const LogBuffer = @import("../../LogBuffer.zig");
+const generateUid = @import("../../setup.zig").generateUid;
 const Thread = @import("../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const NsTid = Thread.NsTid;
@@ -81,7 +83,11 @@ fn makeCloseNotif(tid: AbsTid, vfd: i32) linux.SECCOMP.notif {
 test "open proc -> read -> close returns NsTid" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     // Open /proc/self
@@ -117,7 +123,11 @@ test "open proc -> read -> close returns NsTid" {
 test "open tmp -> write -> close -> reopen -> read -> close" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     // Open /tmp/e2e_test.txt with CREAT|WRONLY|TRUNC
@@ -177,7 +187,11 @@ test "open tmp -> write -> close -> reopen -> read -> close" {
 test "three files open simultaneously, each returns correct data" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     // Open a proc file
@@ -240,7 +254,11 @@ test "three files open simultaneously, each returns correct data" {
 test "close one of three, other two remain accessible, closed one EBADF" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     // Open three files
@@ -298,7 +316,11 @@ test "close one of three, other two remain accessible, closed one EBADF" {
 test "open -> close -> open -> second open gets next VFD (no reuse)" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     // Open first file
@@ -329,7 +351,11 @@ test "open -> close -> open -> second open gets next VFD (no reuse)" {
 test "CLONE_FILES fork - child sees parents FDs, parent sees childs" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     // Parent opens a file
@@ -373,7 +399,11 @@ test "CLONE_FILES fork - child sees parents FDs, parent sees childs" {
 test "non-CLONE_FILES fork - independent tables, parent close doesnt affect child" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     // Parent opens a file
@@ -411,7 +441,11 @@ test "non-CLONE_FILES fork - independent tables, parent close doesnt affect chil
 test "child namespace reads /proc/self -> sees NsTid 1" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
     defer proc_info.testing.reset(allocator);
 
@@ -448,7 +482,11 @@ test "child namespace reads /proc/self -> sees NsTid 1" {
 test "openat /tmp/../sys/class/net normalizes to blocked EPERM" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const resp = openat_handler(
@@ -466,7 +504,11 @@ test "openat /tmp/../sys/class/net normalizes to blocked EPERM" {
 test "unknown VFD returns EBADF across all handlers" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const bad_vfd: i32 = 99;
@@ -534,7 +576,11 @@ test "unknown VFD returns EBADF across all handlers" {
 test "unknown PID returns ESRCH across all handlers" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const bad_tid: AbsTid = 999;
@@ -578,7 +624,11 @@ test "unknown PID returns ESRCH across all handlers" {
 test "fstat on proc file writes correct struct stat" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     // Open /proc/self
@@ -615,7 +665,11 @@ test "fstat on proc file writes correct struct stat" {
 test "fstat on stdio fd returns continue" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     var stat_buf: Stat = std.mem.zeroes(Stat);
@@ -640,7 +694,11 @@ test "fstat on stdio fd returns continue" {
 test "fstat on unknown VFD returns EBADF" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     var stat_buf: Stat = std.mem.zeroes(Stat);

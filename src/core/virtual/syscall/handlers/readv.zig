@@ -6,6 +6,8 @@ const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
 const Supervisor = @import("../../../Supervisor.zig");
+const LogBuffer = @import("../../../LogBuffer.zig");
+const generateUid = @import("../../../setup.zig").generateUid;
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
 const replyErr = @import("../../../seccomp/notif.zig").replyErr;
@@ -114,7 +116,11 @@ const ProcFile = ProcFileMod.ProcFile;
 test "readv single iovec reads data correctly" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
@@ -143,7 +149,11 @@ test "readv single iovec reads data correctly" {
 test "readv multiple iovecs distributes data across buffers" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
@@ -175,7 +185,11 @@ test "readv multiple iovecs distributes data across buffers" {
 test "readv FD 0 returns replyContinue" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     var buf: [64]u8 = undefined;
@@ -197,7 +211,11 @@ test "readv FD 0 returns replyContinue" {
 test "readv non-existent VFD returns EBADF" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     var buf: [64]u8 = undefined;

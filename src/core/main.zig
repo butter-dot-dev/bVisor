@@ -1,7 +1,11 @@
 const std = @import("std");
 const types = @import("types.zig"); // ERIK TODO: kitchen sink utils, think about what else we could do here
 const Logger = types.Logger;
-const setupAndRun = @import("setup.zig").setupAndRun;
+const LogBuffer = @import("LogBuffer.zig");
+const setup = @import("setup.zig");
+const Io = std.Io;
+const File = Io.File;
+const execute = setup.execute;
 const smokeTest = @import("smoke_test.zig").smokeTest;
 
 test {
@@ -41,6 +45,20 @@ pub fn main() !void {
     const logger = Logger.init(.prefork);
     logger.log("Running smoke test with syscall interception:", .{});
 
-    // Run the smoke test inside the sandbox
-    try setupAndRun(smokeTest);
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var threaded: std.Io.Threaded = .init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var stdout = LogBuffer.init(allocator);
+    var stderr = LogBuffer.init(allocator);
+    defer stdout.deinit();
+    defer stderr.deinit();
+
+    try execute(allocator, io, setup.generateUid(), smokeTest, &stdout, &stderr);
+    try stdout.flush(io, File.stdout());
+    try stderr.flush(io, File.stderr());
 }

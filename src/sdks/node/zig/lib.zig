@@ -1,6 +1,6 @@
 const napi = @import("napi.zig");
 const Sandbox = @import("Sandbox.zig");
-const Stream = Sandbox.Stream;
+const Stream = @import("Stream.zig");
 
 export fn napi_register_module_v1(env: napi.c.napi_env, exports: napi.c.napi_value) napi.c.napi_value {
     const funcs = .{

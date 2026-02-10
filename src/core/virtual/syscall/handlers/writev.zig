@@ -6,6 +6,7 @@ const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
 const Supervisor = @import("../../../Supervisor.zig");
+const generateUid = @import("../../../setup.zig").generateUid;
 const replyContinue = @import("../../../seccomp/notif.zig").replyContinue;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
 const replyErr = @import("../../../seccomp/notif.zig").replyErr;
@@ -51,11 +52,11 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         }
 
         if (fd == linux.STDOUT_FILENO) {
-            supervisor.log_buffer.writeStdout(supervisor.io, stdio_buf[0..stdio_len]) catch {
+            supervisor.stdout.write(supervisor.io, stdio_buf[0..stdio_len]) catch {
                 return replyErr(notif.id, .IO);
             };
         } else {
-            supervisor.log_buffer.writeStderr(supervisor.io, stdio_buf[0..stdio_len]) catch {
+            supervisor.stderr.write(supervisor.io, stdio_buf[0..stdio_len]) catch {
                 return replyErr(notif.id, .IO);
             };
         }
@@ -132,9 +133,14 @@ const FdTable = @import("../../fs/FdTable.zig");
 const Tmp = @import("../../fs/backend/tmp.zig").Tmp;
 
 test "writev single iovec writes data" {
+    const LogBuffer = @import("../../../LogBuffer.zig");
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
@@ -159,9 +165,14 @@ test "writev single iovec writes data" {
 }
 
 test "writev multiple iovecs concatenated write" {
+    const LogBuffer = @import("../../../LogBuffer.zig");
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
@@ -190,10 +201,15 @@ test "writev multiple iovecs concatenated write" {
 }
 
 test "writev FD 1 (stdout) captures into log buffer" {
+    const LogBuffer = @import("../../../LogBuffer.zig");
     const allocator = testing.allocator;
     const io = testing.io;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const data = "hello";
@@ -214,10 +230,15 @@ test "writev FD 1 (stdout) captures into log buffer" {
 }
 
 test "writev FD 2 (stderr) captures into log buffer" {
+    const LogBuffer = @import("../../../LogBuffer.zig");
     const allocator = testing.allocator;
     const io = testing.io;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const data = "error";
@@ -238,10 +259,15 @@ test "writev FD 2 (stderr) captures into log buffer" {
 }
 
 test "writev stdout: write, write, drain, write, drain" {
+    const LogBuffer = @import("../../../LogBuffer.zig");
     const allocator = testing.allocator;
     const io = testing.io;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     // writev "hel" + "lo "
@@ -273,7 +299,7 @@ test "writev stdout: write, write, drain, write, drain" {
     try testing.expect(!isError(r2));
 
     // drain — should see "hel" + "lo " + "world"
-    const drain1 = try supervisor.log_buffer.readStdout(io, allocator);
+    const drain1 = try supervisor.stdout.read(allocator, io);
     defer allocator.free(drain1);
     try testing.expectEqualStrings("hello world", drain1);
 
@@ -291,15 +317,20 @@ test "writev stdout: write, write, drain, write, drain" {
     try testing.expect(!isError(r3));
 
     // drain — should see only "!"
-    const drain2 = try supervisor.log_buffer.readStdout(io, allocator);
+    const drain2 = try supervisor.stdout.read(allocator, io);
     defer allocator.free(drain2);
     try testing.expectEqualStrings("!", drain2);
 }
 
 test "writev non-existent VFD returns EBADF" {
+    const LogBuffer = @import("../../../LogBuffer.zig");
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const data = "hello";

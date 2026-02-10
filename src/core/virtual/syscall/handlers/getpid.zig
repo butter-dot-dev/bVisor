@@ -1,6 +1,8 @@
 const std = @import("std");
 const linux = std.os.linux;
 const Supervisor = @import("../../../Supervisor.zig");
+const generateUid = @import("../../../setup.zig").generateUid;
+const LogBuffer = @import("../../../LogBuffer.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const AbsTgid = Thread.AbsTgid;
@@ -45,7 +47,11 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 test "getpid returns init Thread's AbsTgid" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 12345;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const notif = makeNotif(.getpid, .{ .pid = init_tid });
@@ -57,7 +63,11 @@ test "getpid for child Thread returns its AbsTgid" {
     const allocator = testing.allocator;
     // Add an initial guest
     const init_guest_tid: AbsTid = 100;
-    var supervisor = try Supervisor.init(allocator, testing.io, -1, init_guest_tid);
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_guest_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     // Add a child to the initial guest

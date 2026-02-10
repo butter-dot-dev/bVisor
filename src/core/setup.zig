@@ -1,61 +1,62 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const posix = std.posix;
 const linux = std.os.linux;
 const types = @import("types.zig");
 const seccomp = @import("seccomp/filter.zig");
 const Logger = types.Logger;
 const Supervisor = @import("Supervisor.zig");
+const LogBuffer = @import("LogBuffer.zig");
+const Allocator = std.mem.Allocator;
+const Io = std.Io;
 
 // comptime dependency injection
 const deps = @import("deps/deps.zig");
-// ERIK TODO: now that we have unit tests in docker, consider removing deps comptime switch entirely
 const lookupGuestFd = deps.pidfd.lookupGuestFdWithRetry;
 
-/// seccomp.install() allocates the lowest available fd. After fork the guest
-/// has only 0/1/2, so the notify fd will be 3. Both sides hardcode this to
-/// avoid IPC. If anything opens an fd before seccomp.install(), this will
-/// fail with NotifyFdMismatch.
-const guest_notify_fd: linux.fd_t = 3;
+pub fn execute(allocator: Allocator, io: Io, uid: [16]u8, runnable: *const fn () void, stdout: *LogBuffer, stderr: *LogBuffer) !void {
+    // Probe the next available FD: dup gives the lowest free FD, then close it.
+    // After fork, seccomp.install() in the child will allocate the same FD number.
+    // This will race with other noise in the env, and is a temp solution
+    const expected_notify_fd = try posix.dup(0);
+    posix.close(expected_notify_fd);
 
-pub fn setupAndRun(runnable: *const fn () void) !void {
     const fork_result = try posix.fork();
     if (fork_result == 0) {
-        try guestProcess(runnable);
+        try guestProcess(runnable, expected_notify_fd);
     } else {
-        const init_guest_pid: linux.pid_t = fork_result;
-        try supervisorProcess(init_guest_pid);
+        const init_guest_tid: linux.pid_t = fork_result;
+        try supervisorProcess(allocator, io, uid, init_guest_tid, expected_notify_fd, stdout, stderr);
     }
 }
 
-fn guestProcess(runnable: *const fn () void) !void {
-    const logger = Logger.init(.guest);
-    logger.log("Guest process starting", .{});
-    logger.log("Entering seccomp mode", .{});
+fn guestProcess(runnable: *const fn () void, expected_notify_fd: linux.fd_t) !void {
     const notify_fd = try seccomp.install();
-
-    if (notify_fd != guest_notify_fd) {
+    if (notify_fd != expected_notify_fd) {
         return error.NotifyFdMismatch;
     }
-
     @call(.never_inline, runnable, .{});
+    linux.exit(0);
 }
 
-fn supervisorProcess(init_guest_pid: linux.pid_t) !void {
+fn supervisorProcess(allocator: Allocator, io: Io, uid: [16]u8, init_guest_tid: linux.pid_t, expected_notify_fd: linux.fd_t, stdout: *LogBuffer, stderr: *LogBuffer) !void {
     const logger = Logger.init(.supervisor);
     logger.log("Supervisor process starting", .{});
     defer logger.log("Supervisor process exiting", .{});
 
-    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = debug_allocator.deinit();
-    const gpa = debug_allocator.allocator();
+    const notify_fd = try lookupGuestFd(init_guest_tid, expected_notify_fd, io);
 
-    var threaded: std.Io.Threaded = .init(gpa, .{});
-    defer threaded.deinit();
-    const io = threaded.io();
-
-    const notify_fd = try lookupGuestFd(init_guest_pid, guest_notify_fd, io);
-
-    var supervisor = try Supervisor.init(gpa, io, notify_fd, init_guest_pid);
+    var supervisor = try Supervisor.init(allocator, io, uid, notify_fd, init_guest_tid, stdout, stderr);
     defer supervisor.deinit();
     try supervisor.run();
+}
+
+pub fn generateUid() [16]u8 {
+    var uid_bytes: [8]u8 = undefined;
+    if (builtin.is_test) {
+        @memcpy(&uid_bytes, "testtest");
+    } else {
+        std.crypto.random.bytes(&uid_bytes);
+    }
+    return std.fmt.bytesToHex(uid_bytes, .lower);
 }
