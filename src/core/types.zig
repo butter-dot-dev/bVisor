@@ -89,21 +89,22 @@ pub fn linuxToPosixFlags(linux_flags: linux.O) posix.O {
     return flags;
 }
 
-/// Linux kernel's `struct stat` for aarch64 (arm64).
+/// Linux kernel's `struct stat`, selected by target architecture at comptime.
 ///
 /// This is the ABI struct written by the
 ///     fstat(2), stat(2), lstat(2), and newfstatat(2)
-/// syscalls. The layout comes from the kernel's
-/// `arch/arm64/include/asm/stat.h` which pulls in `asm-generic/stat.h`
-/// (arm64 has no arch-specific override).
+/// syscalls.
 ///
 /// NOT the same as `linux.Statx` (256 bytes, used by the statx(2) syscall).
-/// This struct is 128 bytes on aarch64-linux with LP64.
-///
+pub const Stat = switch (builtin.cpu.arch) {
+    .aarch64 => AArch64Stat,
+    .x86_64 => X86_64Stat,
+    else => @compileError("Stat layout not defined for " ++ @tagName(builtin.cpu.arch)),
+};
+
+/// aarch64 layout from `asm-generic/stat.h` — 128 bytes
 /// Reference: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/include/uapi/asm-generic/stat.h
-///
-/// NOTE: This definition is aarch64-specific. x86_64 uses a different layout
-pub const Stat = extern struct {
+const AArch64Stat = extern struct {
     st_dev: u64, // Device
     st_ino: u64, // File serial number
     st_mode: u32, // File mode
@@ -126,10 +127,33 @@ pub const Stat = extern struct {
     __unused5: u32,
 
     comptime {
-        // aarch64-specific, for now
-        if (builtin.cpu.arch != .aarch64)
-            @compileError("Stat layout is aarch64-specific; add a definition for " ++ @tagName(builtin.cpu.arch));
-        // Kernel ABI requires exactly 128 bytes on aarch64.
-        std.debug.assert(@sizeOf(Stat) == 128);
+        std.debug.assert(@sizeOf(AArch64Stat) == 128);
+    }
+};
+
+/// x86_64 layout from `arch/x86/include/uapi/asm/stat.h` — 144 bytes
+/// Reference: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/arch/x86/include/uapi/asm/stat.h
+const X86_64Stat = extern struct {
+    st_dev: u64, // Device
+    st_ino: u64, // File serial number
+    st_nlink: u64, // Link count (u64, not u32)
+    st_mode: u32, // File mode
+    st_uid: u32, // User ID of the file's owner
+    st_gid: u32, // Group ID of the file's group
+    __pad0: u32,
+    st_rdev: u64, // Device number, if device
+    st_size: i64, // Size of file, in bytes
+    st_blksize: i64, // Optimal block size for I/O (i64, not i32)
+    st_blocks: i64, // Number 512-byte blocks allocated
+    st_atime: u64, // Time of last access
+    st_atime_nsec: u64,
+    st_mtime: u64, // Time of last modification
+    st_mtime_nsec: u64,
+    st_ctime: u64, // Time of last status change
+    st_ctime_nsec: u64,
+    __unused: [3]i64,
+
+    comptime {
+        std.debug.assert(@sizeOf(X86_64Stat) == 144);
     }
 };

@@ -651,8 +651,8 @@ test "fstat on proc file writes correct struct stat" {
     // ProcFile.statx sets: mode = S.IFREG | 0o444, nlink = 1, blksize = 4096, size = content_len
     // Content of /proc/self for tid 100 is "100\n" (4 bytes)
     try testing.expectEqual(linux.S.IFREG | 0o444, stat_buf.st_mode);
-    try testing.expectEqual(@as(u32, 1), stat_buf.st_nlink);
-    try testing.expectEqual(@as(i32, 4096), stat_buf.st_blksize);
+    try testing.expectEqual(@as(@TypeOf(stat_buf.st_nlink), 1), stat_buf.st_nlink);
+    try testing.expectEqual(@as(@TypeOf(stat_buf.st_blksize), 4096), stat_buf.st_blksize);
     try testing.expectEqual(@as(i64, 4), stat_buf.st_size);
 
     _ = close_handler(makeCloseNotif(init_tid, vfd), &supervisor);
