@@ -79,9 +79,12 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         return replyErr(notif.id, .INVAL);
     }
 
-    // Get caller's cwd for relative path resolution (copy to stack, release lock)
-    var cwd_buf: [512]u8 = undefined;
-    const cwd: []const u8 = blk: {
+    // Determine base directory for path resolution (copy to stack, release lock)
+    // - Absolute paths: base is irrelevant (resolveAndRoute ignores it)
+    // - Relative + AT_FDCWD: resolve against caller's cwd
+    // - Relative + real dirfd: resolve against dirfd's opened path
+    var base_buf: [512]u8 = undefined;
+    const base: []const u8 = blk: {
         supervisor.mutex.lockUncancelable(supervisor.io);
         defer supervisor.mutex.unlock(supervisor.io);
 
@@ -90,14 +93,33 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
             return replyErr(notif.id, .SRCH);
         };
 
+        // Relative path with a real dirfd: use dirfd's opened path as base
+        if (path[0] != '/' and dirfd != -100) {
+            const dir_file = caller.fd_table.get_ref(dirfd) orelse {
+                logger.log("fstatat64: EBADF for dirfd={d}", .{dirfd});
+                return replyErr(notif.id, .BADF);
+            };
+            defer dir_file.unref();
+
+            const dir_path = dir_file.opened_path orelse {
+                logger.log("fstatat64: dirfd={d} has no associated path", .{dirfd});
+                return replyErr(notif.id, .NOTDIR);
+            };
+            if (dir_path.len > base_buf.len) return replyErr(notif.id, .NAMETOOLONG);
+            @memcpy(base_buf[0..dir_path.len], dir_path);
+            break :blk base_buf[0..dir_path.len];
+        }
+
+        // Otherwise use cwd
         const c = caller.fs_info.cwd;
-        @memcpy(cwd_buf[0..c.len], c);
-        break :blk cwd_buf[0..c.len];
+        if (c.len > base_buf.len) return replyErr(notif.id, .NAMETOOLONG);
+        @memcpy(base_buf[0..c.len], c);
+        break :blk base_buf[0..c.len];
     };
 
-    // Resolve path against cwd and route through access rules
+    // Resolve path against base and route through access rules
     var resolve_buf: [512]u8 = undefined;
-    const route_result = resolveAndRoute(cwd, path, &resolve_buf) catch {
+    const route_result = resolveAndRoute(base, path, &resolve_buf) catch {
         return replyErr(notif.id, .NAMETOOLONG);
     };
 

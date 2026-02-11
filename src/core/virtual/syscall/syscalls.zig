@@ -31,7 +31,6 @@ const fchdir = @import("handlers/fchdir.zig");
 
 pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
     const sys: linux.SYS = @enumFromInt(notif.data.nr);
-    std.debug.print("\n", .{});
     supervisor.logger.log("Handling syscall: {s}", .{@tagName(sys)});
     return switch (sys) {
         // Implemented - files
