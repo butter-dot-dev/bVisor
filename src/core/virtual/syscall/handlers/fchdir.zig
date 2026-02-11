@@ -5,6 +5,8 @@ const Supervisor = @import("../../../Supervisor.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
+const path_router = @import("../../path.zig");
+const route = path_router.route;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
 const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 
@@ -39,6 +41,15 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         logger.log("fchdir: fd={d} has no associated path", .{fd});
         return replyErr(notif.id, .NOTDIR);
     };
+
+    // Validate path through routing rules before updating cwd
+    const route_result = route(path) catch {
+        return replyErr(notif.id, .NAMETOOLONG);
+    };
+    if (route_result == .block) {
+        logger.log("fchdir: blocked path: {s}", .{path});
+        return replyErr(notif.id, .PERM);
+    }
 
     // Verify it's a directory via statx
     const statx_buf = file.statx() catch |err| {
@@ -177,6 +188,32 @@ test "fchdir + getcwd roundtrip via openat" {
     const getcwd_resp = getcwd.handle(getcwd_notif, &supervisor);
     try testing.expect(!isError(getcwd_resp));
     try testing.expectEqualStrings("/tmp", std.mem.sliceTo(&buf, 0));
+}
+
+test "fchdir on fd with blocked path returns EPERM" {
+    const allocator = testing.allocator;
+    const init_tid: AbsTid = 100;
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    defer supervisor.deinit();
+
+    // Manually insert a file with a blocked opened_path
+    const thread = supervisor.guest_threads.lookup.get(init_tid).?;
+    const file = try File.init(allocator, .{ .passthrough = .{ .fd = 42 } });
+    try file.setOpenedPath("/sys/class/net");
+    const vfd = try thread.fd_table.insert(file, .{});
+
+    const notif = makeNotif(.fchdir, .{
+        .pid = init_tid,
+        .arg0 = @as(u64, @intCast(vfd)),
+    });
+    const resp = handle(notif, &supervisor);
+
+    try testing.expect(isError(resp));
+    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.PERM))), resp.@"error");
 }
 
 test "fchdir on non-directory fd returns ENOTDIR" {

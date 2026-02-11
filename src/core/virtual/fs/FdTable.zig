@@ -57,18 +57,18 @@ pub fn unref(self: *Self) void {
 /// Each File is copied (not shared), but cloexec flags are preserved.
 pub fn clone(self: *Self, allocator: Allocator) !*Self {
     const new = try allocator.create(Self);
-    errdefer self.allocator.destroy(new);
+    errdefer allocator.destroy(new);
 
     // AutoHashMapUnmanaged has no clone(), so we iterate manually
     var new_open_files: std.AutoHashMapUnmanaged(VirtualFD, FdEntry) = .empty;
-    errdefer new_open_files.deinit(self.allocator);
+    errdefer new_open_files.deinit(allocator);
 
     var iter = self.open_files.iterator();
     while (iter.next()) |entry| {
         const old_entry = entry.value_ptr.*;
         const file_copy = try File.init(allocator, old_entry.file.backend);
         try file_copy.setOpenedPath(old_entry.file.opened_path);
-        try new_open_files.put(self.allocator, entry.key_ptr.*, FdEntry{
+        try new_open_files.put(allocator, entry.key_ptr.*, FdEntry{
             .file = file_copy,
             .cloexec = old_entry.cloexec,
         });
