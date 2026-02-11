@@ -15,9 +15,7 @@ const isError = @import("../../../seccomp/notif.zig").isError;
 const isContinue = @import("../../../seccomp/notif.zig").isContinue;
 const replyContinue = @import("../../../seccomp/notif.zig").replyContinue;
 
-// comptime dependency injection
-const deps = @import("../../../deps/deps.zig");
-const memory_bridge = deps.memory_bridge;
+const memory_bridge = @import("../../../utils/memory_bridge.zig");
 
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
     const logger = supervisor.logger;

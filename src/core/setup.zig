@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const posix = std.posix;
 const linux = std.os.linux;
 const types = @import("types.zig");
@@ -10,9 +9,8 @@ const LogBuffer = @import("LogBuffer.zig");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-// comptime dependency injection
-const deps = @import("deps/deps.zig");
-const lookupGuestFd = deps.pidfd.lookupGuestFdWithRetry;
+const pidfd = @import("utils/pidfd.zig");
+const lookupGuestFd = pidfd.lookupGuestFdWithRetry;
 
 pub fn execute(allocator: Allocator, io: Io, uid: [16]u8, runnable: *const fn () void, stdout: *LogBuffer, stderr: *LogBuffer) !void {
     // Probe the next available FD: dup gives the lowest free FD, then close it.
@@ -53,10 +51,6 @@ fn supervisorProcess(allocator: Allocator, io: Io, uid: [16]u8, init_guest_tid: 
 
 pub fn generateUid() [16]u8 {
     var uid_bytes: [8]u8 = undefined;
-    if (builtin.is_test) {
-        @memcpy(&uid_bytes, "testtest");
-    } else {
-        std.crypto.random.bytes(&uid_bytes);
-    }
+    std.crypto.random.bytes(&uid_bytes);
     return std.fmt.bytesToHex(uid_bytes, .lower);
 }

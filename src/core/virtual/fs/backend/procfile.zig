@@ -178,7 +178,7 @@ pub const ProcFile = struct {
 
 const testing = std.testing;
 const Threads = @import("../../proc/Threads.zig");
-const proc_info = @import("../../../deps/proc_info/proc_info.zig");
+const proc_info = @import("../../../utils/proc_info.zig");
 
 test "parseProcPath - /proc/self" {
     const target = try ProcFile.parseProcPath("/proc/self");
@@ -289,14 +289,14 @@ test "open /proc/<N>/status for visible Thread" {
     const allocator = testing.allocator;
     var v_threads = Threads.init(allocator);
     defer v_threads.deinit();
-    defer proc_info.testing.reset(allocator);
+    defer proc_info.mock.reset(allocator);
 
     try v_threads.handleInitialThread(100);
     const root = v_threads.lookup.get(100).?;
 
     // Create child in new namespace
     const nstids = [_]NsTgid{ 200, 1 };
-    try proc_info.testing.setupNsTids(allocator, 200, &nstids);
+    try proc_info.mock.setupNsTids(allocator, 200, &nstids);
     _ = try v_threads.registerChild(root, 200, Threads.CloneFlags.from(std.os.linux.CLONE.NEWPID));
     const child = v_threads.lookup.get(200).?;
 
@@ -334,14 +334,14 @@ test "child in new namespace (CLONE_NEWPID) /proc/self returns 1" {
     const allocator = testing.allocator;
     var v_threads = Threads.init(allocator);
     defer v_threads.deinit();
-    defer proc_info.testing.reset(allocator);
+    defer proc_info.mock.reset(allocator);
 
     try v_threads.handleInitialThread(100);
     const root = v_threads.lookup.get(100).?;
 
     // Child in new namespace gets NsTgid 1
     const nstids = [_]NsTgid{ 200, 1 };
-    try proc_info.testing.setupNsTids(allocator, 200, &nstids);
+    try proc_info.mock.setupNsTids(allocator, 200, &nstids);
     _ = try v_threads.registerChild(root, 200, Threads.CloneFlags.from(std.os.linux.CLONE.NEWPID));
     const child = v_threads.lookup.get(200).?;
 
@@ -355,13 +355,13 @@ test "open /proc/self/status - child with parent invisible (new namespace) has P
     const allocator = testing.allocator;
     var v_threads = Threads.init(allocator);
     defer v_threads.deinit();
-    defer proc_info.testing.reset(allocator);
+    defer proc_info.mock.reset(allocator);
 
     try v_threads.handleInitialThread(100);
     const root = v_threads.lookup.get(100).?;
 
     const nstids = [_]NsTgid{ 200, 1 };
-    try proc_info.testing.setupNsTids(allocator, 200, &nstids);
+    try proc_info.mock.setupNsTids(allocator, 200, &nstids);
     _ = try v_threads.registerChild(root, 200, Threads.CloneFlags.from(std.os.linux.CLONE.NEWPID));
     const child = v_threads.lookup.get(200).?;
 
@@ -397,14 +397,14 @@ test "open /proc/N where N is in different namespace returns FileNotFound" {
     const allocator = testing.allocator;
     var v_threads = Threads.init(allocator);
     defer v_threads.deinit();
-    defer proc_info.testing.reset(allocator);
+    defer proc_info.mock.reset(allocator);
 
     try v_threads.handleInitialThread(100);
     const root = v_threads.lookup.get(100).?;
 
     // Child in new namespace
     const nstids = [_]NsTgid{ 200, 1 };
-    try proc_info.testing.setupNsTids(allocator, 200, &nstids);
+    try proc_info.mock.setupNsTids(allocator, 200, &nstids);
     _ = try v_threads.registerChild(root, 200, Threads.CloneFlags.from(std.os.linux.CLONE.NEWPID));
     const child = v_threads.lookup.get(200).?;
 

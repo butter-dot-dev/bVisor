@@ -3,7 +3,7 @@ const linux = std.os.linux;
 const Allocator = std.mem.Allocator;
 const Thread = @import("Thread.zig");
 
-const proc_info = @import("../../deps/proc_info/proc_info.zig");
+const proc_info = @import("../../utils/proc_info.zig");
 const readNsTids = proc_info.readNsTids;
 
 // Thread IDs

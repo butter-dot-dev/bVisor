@@ -2,15 +2,12 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
-    const use_docker = b.option(bool, "use-docker", "Run tests in Docker container") orelse false;
 
-    // Target multiple platforms based on testing flags
     const linux_target = b.resolveTargetQuery(.{
-        .cpu_arch = .aarch64, // ARM64 for Apple Silicon Macs running Docker, update for other targets
+        .cpu_arch = .aarch64,
         .os_tag = .linux,
         .abi = .musl,
     });
-    const host_target = b.graph.host;
 
     // Build node bindings library for each platform
     const node_api = b.dependency("node_api", .{});
@@ -23,7 +20,6 @@ pub fn build(b: *std.Build) void {
         .{ .cpu_arch = .aarch64, .abi = .musl, .dest_dir = "../src/sdks/node/platforms/linux-arm64-musl" },
         .{ .cpu_arch = .aarch64, .abi = .gnu, .dest_dir = "../src/sdks/node/platforms/linux-arm64-gnu" },
 
-        // TODO: add x86_64 platforms
         // .{ .cpu_arch = .x86_64, .abi = .musl, .dest_dir = "../src/sdks/node/platforms/linux-x64-musl" },
         // .{ .cpu_arch = .x86_64, .abi = .gnu, .dest_dir = "../src/sdks/node/platforms/linux-x64-gnu" },
     };
@@ -74,15 +70,6 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(linux_exe);
 
-    // Build zig tests for running on host
-    const host_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/core/main.zig"),
-            .target = host_target,
-            .optimize = optimize,
-        }),
-    });
-
     // Build and install zig tests for running in linux container
     const linux_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -101,15 +88,10 @@ pub fn build(b: *std.Build) void {
     run_cmd.step.dependOn(b.getInstallStep()); // docker run depends on linux exe being built
     run_cli_step.dependOn(&run_cmd.step);
 
-    // 'test' runs unit tests (use -Duse-docker to run in container)
-    const test_cli_step = b.step("test", "Run unit tests (-Duse-docker for Linux container)");
-    if (use_docker) {
-        const docker_args = [_][]const u8{ "docker", "run", "--rm", "-v", "./zig-out:/zig-out", "alpine", "/zig-out/bin/tests" };
-        const docker_cmd = b.addSystemCommand(&docker_args);
-        docker_cmd.step.dependOn(b.getInstallStep());
-        test_cli_step.dependOn(&docker_cmd.step);
-    } else {
-        const run_tests = b.addRunArtifact(host_tests);
-        test_cli_step.dependOn(&run_tests.step);
-    }
+    // 'test' runs unit tests in a linux container
+    const test_cli_step = b.step("test", "Run unit tests in Docker container");
+    const docker_test_args = [_][]const u8{ "docker", "run", "--rm", "-v", "./zig-out:/zig-out", "alpine", "/zig-out/bin/tests" };
+    const docker_test_cmd = b.addSystemCommand(&docker_test_args);
+    docker_test_cmd.step.dependOn(b.getInstallStep());
+    test_cli_step.dependOn(&docker_test_cmd.step);
 }

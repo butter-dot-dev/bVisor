@@ -15,15 +15,13 @@ The goal of bVisor is to be a lightweight sandbox for untrusted user or LLM-gene
 ## Build Commands
 
 ```bash
-zig build                    # Build for aarch64-linux-musl
-zig build test               # Run unit tests on host
-zig build test -Duse-docker  # Run unit tests in Docker container
+zig build                    # Build all targets (exe, tests, node .node binaries)
+zig build test               # Run unit tests in Docker container
 zig build run                # Run executable in Docker container
 ```
 
-The build targets aarch64 Linux with musl ABI (for ARM64/Apple Silicon Docker). Modify `build.zig` lines 9-11 for other targets.
 
-**Requires**: Zig 0.16.0-dev or later
+**Requires**: Zig 0.16.0-dev or later, Docker
 
 
 ## Architecture
@@ -33,34 +31,26 @@ The build targets aarch64 Linux with musl ABI (for ARM64/Apple Silicon Docker). 
 ```
 src/
   core/                 # Zig sandbox runtime
-    main.zig            # Entry point, demonstrates sandbox usage
+    root.zig            # Public exports for SDK usage
+    main.zig            # Entry point, runs smoke test
     setup.zig           # Fork into child/supervisor, seccomp BPF installation
-    supervisor.zig      # Main loop: recv notif → handle → send response
+    Supervisor.zig      # Main loop: recv notif → handle → send response
     types.zig           # LinuxResult, Logger
-    smoke_test.zig      # TDD-style smoke test exercising sandbox syscall handling
+    LogBuffer.zig       # Thread-safe buffered output capture (stdout/stderr)
+    smoke_test.zig      # TDD-style smoke test scorecard
 
     seccomp/
       filter.zig        # BPF filter installation, returns notify FD
       notif.zig         # Helper to construct test notifications
 
-    deps/               # Comptime dependency injection for testability
-      deps.zig          # Re-exports pidfd, memory_bridge, proc_info
-      memory_bridge/
-        memory_bridge.zig # Comptime selector for implementation
-        impl/linux.zig    # Production: process_vm_readv/writev
-        impl/testing.zig  # Testing: local pointer access
-      pidfd/
-        pidfd.zig         # Comptime selector for implementation
-        impl/linux.zig    # Production: pidfd_open/pidfd_getfd
-        impl/testing.zig  # Testing: mock implementation
-      proc_info/
-        proc_info.zig     # Comptime selector for implementation
-        impl/linux.zig    # Production: TID/TGID info, clone flags detection via /proc
-        impl/testing.zig  # Testing: mock maps (mock_ptid_map, mock_clone_flags, mock_nstids, mock_nstgids)
+    utils/              # Linux utility modules
+      memory_bridge.zig # process_vm_readv/writev (test mode: local pointer access)
+      pidfd.zig         # pidfd_open/pidfd_getfd (test mode: passthrough)
+      proc_info.zig     # TID/TGID info, clone flags via /proc (test mode: mock maps)
 
     virtual/            # Virtualization layer
       OverlayRoot.zig   # Root overlay filesystem management
-      path.zig          # Path normalization and resolution utilities
+      path.zig          # Path routing: prefix-tree rules (block/passthrough/cow/tmp/proc)
       proc/             # Thread/process virtualization
         Threads.zig     # Manages all threads, kernel TID → Thread mapping
         Thread.zig      # Single thread: tid, thread_group, namespace, fd_table, parent/children
@@ -72,28 +62,41 @@ src/
         FdEntry.zig     # Entry type in fd table, containing pointer to File and CLOEXEC flag
         File.zig        # Virtual file with Backend union and refcounting
         backend/        # File backend implementations
-          passthrough.zig # Kernel FD passthrough
-          cow.zig       # Copy-on-write files
-          tmp.zig       # Temporary files
+          passthrough.zig # Kernel FD passthrough (/dev/null, /dev/zero, /dev/random, /dev/urandom)
+          cow.zig       # Copy-on-write files (default for most paths)
+          tmp.zig       # Overlay-redirected /tmp files
           procfile.zig  # Virtualized /proc files
       syscall/          # Syscall handlers
         syscalls.zig    # Switch statement over syscalls, parsing notifications
         e2e_test.zig    # End-to-end syscall tests
-        handlers/       # Individual syscall handlers (lowercase filenames)
+        handlers/       # Individual syscall handlers
           openat.zig    # openat handler with path rules (block/allow/virtualize)
           close.zig     # close handler
           read.zig, write.zig, readv.zig, writev.zig  # I/O handlers
+          lseek.zig     # File seek
+          dup.zig, dup3.zig  # FD duplication
+          fstat.zig, fstatat64.zig  # File metadata
           getpid.zig, getppid.zig, gettid.zig         # ID handlers
           exit.zig, exit_group.zig                    # Exit handlers
           kill.zig, tkill.zig                         # Signal handlers
+          uname.zig     # System info (virtualizes hostname/domainname)
+          sysinfo.zig   # System stats (virtualizes uptime/procs)
 
   sdks/
     node/               # Node.js SDK (see src/sdks/node/CLAUDE.md)
       index.ts          # Package entry point
-      src/sandbox.ts    # Sandbox class, platform-aware native loading
+      src/
+        sandbox.ts      # Sandbox class, public API
+        native.ts       # FFI contract: NativeModule interface
+        napi.ts         # External<T> phantom type for opaque native handles
       test.ts           # Smoke test (npm run dev)
       zig/              # Zig N-API bindings source
+        root.zig        # Module registration entry
+        napi.zig        # N-API helpers, ZigExternal(T)
+        Sandbox.zig     # Sandbox implementation
+        Stream.zig      # Output stream management
       platforms/        # Platform-specific npm packages with built .node binaries
+    python/             # Python SDK (placeholder, not yet implemented)
 ```
 
 **Syscall flow**: Child syscall → kernel USER_NOTIF → Supervisor.recv() → Notification.handle() → Syscall handler or passthrough → Supervisor.send()
@@ -115,10 +118,10 @@ src/
 - `.tmp` - temporary files
 - FDs 0,1,2 (stdin/stdout/stderr) are handled specially
 
-**Path resolution in OpenAt**:
-- Paths are normalized (resolving any `..`) before matching
-- Rules: `/sys/` and `/run/` are blocked, `/tmp/` is allowed, `/proc/` is virtualized
-- Path traversal attacks like `src/proc/../etc/passwd` are blocked
+**Path routing in OpenAt**:
+- Paths are normalized (resolving `..`) before matching against prefix rules
+- Examples: `/sys/` blocked, `/dev/null` passthrough, `/proc/` virtualized, `/tmp/` overlay-redirected, everything else COW
+- For up-to-date documentation of pathing, see `path.zig`
 
 **Adding a new emulated syscall:**
 When implementing a new emulated syscall,
@@ -128,46 +131,17 @@ When implementing a new emulated syscall,
 
 ## Testing
 
-**Comptime dependency injection**: `src/deps/` modules use `builtin.is_test` to select implementation:
-```zig
-const impl = if (builtin.is_test)
-    @import("impl/testing.zig")
-else
-    @import("impl/linux.zig");
-```
+All tests run in Docker (`zig build test`). The test binary is cross-compiled for aarch64-linux and executed in an Alpine container.
 
-**Test discovery**: Zig only runs tests from files transitively imported by the test root. Tests in standalone files must be explicitly imported in `src/core/main.zig`:
-```zig
-test {
-    _ = @import("Supervisor.zig");
-    _ = @import("deps/proc_info/impl/linux.zig");
-    _ = @import("virtual/proc/Threads.zig");
-    _ = @import("virtual/fs/FdTable.zig");
-    _ = @import("virtual/path.zig");
-    _ = @import("virtual/fs/backend/procfile.zig");
-    _ = @import("virtual/fs/backend/cow.zig");
-    _ = @import("virtual/fs/backend/tmp.zig");
-    _ = @import("virtual/syscall/handlers/exit.zig");
-    _ = @import("virtual/syscall/handlers/exit_group.zig");
-    _ = @import("virtual/syscall/handlers/tkill.zig");
-    _ = @import("virtual/syscall/handlers/getpid.zig");
-    _ = @import("virtual/syscall/handlers/getppid.zig");
-    _ = @import("virtual/syscall/handlers/kill.zig");
-    _ = @import("virtual/syscall/handlers/openat.zig");
-    _ = @import("virtual/syscall/handlers/close.zig");
-    _ = @import("virtual/syscall/handlers/read.zig");
-    _ = @import("virtual/syscall/handlers/readv.zig");
-    _ = @import("virtual/syscall/handlers/write.zig");
-    _ = @import("virtual/syscall/handlers/writev.zig");
-    _ = @import("virtual/syscall/e2e_test.zig");
-    _ = @import("virtual/OverlayRoot.zig");
-    _ = @import("virtual/fs/backend/passthrough.zig");
-}
-```
+**Test-mode behavior**: `src/core/utils/` modules use `builtin.is_test` to provide lightweight test alternatives (e.g., `memory_bridge` treats addresses as local pointers, `proc_info` uses mock maps instead of `/proc`). This allows unit tests to construct fake notifications without a real child process.
 
-**E2E tests**: Use `makeNotif()` from `src/seccomp/notif.zig` to construct test notifications. `TestingMemoryBridge` treats addresses as local pointers, enabling full syscall handler testing without a real child process.
+**Test discovery**: Zig only runs tests from files imported by the test root. All test files must be reachable from `src/core/main.zig` via `_ = @import(...)` in its `test` block. When adding a new file with tests, add an import there or the tests won't run.
+
+**E2E tests**: Use `makeNotif()` from `src/seccomp/notif.zig` to construct test notifications.
 
 **Logger**: Disabled during tests (`builtin.is_test`) to avoid interfering with `zig build test` IPC.
+
+**Node SDK tests**: From `src/sdks/node/`, run `npm run dev`. This runs `zig build` then executes `test.ts` inside a `oven/bun:alpine` Docker container.
 
 ## Key Linux APIs Used
 - Seccomp user notifier (`SECCOMP_SET_MODE_FILTER`, `SECCOMP_IOCTL_NOTIF_*`)
@@ -184,10 +158,16 @@ test {
 - Where possible, keep structs as individual files, using the file-as-struct pattern with `const Self = @This()`.
 - Prefer the `try` keyword over `catch` when possible.
 - Prefer enums with switches for dynamic dispatch. Inline else to enforce that all enum variants contain methods of a certain signature (see syscall.zig for ref).
-- Use dependency injection where possible to help keep testing free of IO and side effects.
 - Prefer to use stack buffers over heap allocation when possible.
 - PascalCase for types (and functions returning types), snake_case for variables, camelCase for functions.
 - Use init(...) as constructor, and a deferrable deinit(...) if destructor is needed.
+- If the lifetime of an object requires refcounting, store the refcount atomically, and use `ref()` and `unref()` to increment and decrement the count, init() to create a new object with refcount=1, and make deinit(...) private to enforce the refcount pattern. deinit should be triggered by unref() when the refcount reaches 0.
 - Use std.linux specific APIs rather than calling syscalls directly. When in doubt, grep std.linux. The std lib can be found in the same directory as the Zig binary, plus `./lib/std/os/linux.zig`.
 - Batch operations when possible - avoid syscall-per-byte patterns (e.g., use `readSlice` to read known-length buffers in one call).
 - The std library is full of useful APIs. Before writing a new function, check if it already exists in std.
+
+## Comment Style
+- Only include comments if the code is not self-explanatory.
+- Comments are intended to inform future readers about the code. Do not include commentary related to the conversations had with the user, which may look something like "Do ... (this is what we agreed on)". 
+- Do NOT create section dividers like `// =============================================================================`. These are not useful and clutter the code. Do not add them.
+- Do not remove or modify comments unless they are no longer accurate.

@@ -1,13 +1,10 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const linux = std.os.linux;
 const Supervisor = @import("../../../Supervisor.zig");
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
 const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 
-// comptime dependency injection
-const deps = @import("../../../deps/deps.zig");
-const memory_bridge = deps.memory_bridge;
+const memory_bridge = @import("../../../utils/memory_bridge.zig");
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
@@ -30,14 +27,10 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
     // Get real kernel utsname (sysname, release, version, machine)
     var uts: linux.utsname = undefined;
-    if (comptime builtin.is_test) {
-        uts = std.mem.zeroes(linux.utsname);
-    } else {
-        const rc = linux.uname(&uts);
-        if (linux.errno(rc) != .SUCCESS) {
-            logger.log("uname: kernel uname failed", .{});
-            return replyErr(notif.id, .NOSYS);
-        }
+    const rc = linux.uname(&uts);
+    if (linux.errno(rc) != .SUCCESS) {
+        logger.log("uname: kernel uname failed", .{});
+        return replyErr(notif.id, .NOSYS);
     }
 
     // Virtualize only identity-leaking fields
@@ -73,9 +66,8 @@ test "uname returns virtualized system info" {
     try testing.expectEqualStrings("bvisor", std.mem.sliceTo(&uts.nodename, 0));
     try testing.expectEqualStrings("(none)", std.mem.sliceTo(&uts.domainname, 0));
 
-    // Kernel-sourced fields are zeroed in test mode (no real syscall)
-    try testing.expectEqualStrings("", std.mem.sliceTo(&uts.sysname, 0));
-    try testing.expectEqualStrings("", std.mem.sliceTo(&uts.release, 0));
-    try testing.expectEqualStrings("", std.mem.sliceTo(&uts.version, 0));
-    try testing.expectEqualStrings("", std.mem.sliceTo(&uts.machine, 0));
+    // Kernel-sourced fields should be populated from real uname()
+    try testing.expect(std.mem.sliceTo(&uts.sysname, 0).len > 0);
+    try testing.expect(std.mem.sliceTo(&uts.release, 0).len > 0);
+    try testing.expect(std.mem.sliceTo(&uts.machine, 0).len > 0);
 }

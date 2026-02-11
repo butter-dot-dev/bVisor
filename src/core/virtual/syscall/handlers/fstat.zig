@@ -12,8 +12,7 @@ const replyContinue = @import("../../../seccomp/notif.zig").replyContinue;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
 const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 
-const deps = @import("../../../deps/deps.zig");
-const memory_bridge = deps.memory_bridge;
+const memory_bridge = @import("../../../utils/memory_bridge.zig");
 
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
     const logger = supervisor.logger;

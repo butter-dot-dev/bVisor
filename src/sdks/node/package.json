@@ -1,6 +1,6 @@
 {
   "name": "bvisor",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -19,7 +19,9 @@
     "prepublishOnly": "npm run build",
     "predev": "cd ../../.. && zig build",
     "dev": "docker run --rm -v .:/app -w /app oven/bun:alpine sh -c 'bun install && bun test.ts'",
-    "test:published": "docker run --rm -v ./test.ts:/test.ts:ro oven/bun:alpine sh -c 'cd /tmp && echo {} > package.json && bun add bvisor && cp /test.ts . && bun test.ts'"
+    "test:published": "docker run --rm -v ./test.ts:/test.ts:ro oven/bun:alpine sh -c 'cd /tmp && echo {} > package.json && bun add bvisor && cp /test.ts . && bun test.ts'",
+    "version:patch": "npm version patch --workspaces --no-git-tag-version --force && npm version patch --no-git-tag-version --force",
+    "publish:all": "cd platforms/linux-arm64-musl && bun publish --access public && cd ../linux-arm64-gnu && bun publish --access public && cd ../linux-x64-musl && bun publish --access public && cd ../linux-x64-gnu && bun publish --access public && cd ../.. && bun publish --access public"
   },
   "workspaces": [
     "platforms/*"
@@ -28,10 +30,10 @@
     "detect-libc": "^2.0.3"
   },
   "optionalDependencies": {
-    "@bvisor/linux-arm64-musl": "0.0.1",
-    "@bvisor/linux-arm64-gnu": "0.0.1",
-    "@bvisor/linux-x64-musl": "0.0.1",
-    "@bvisor/linux-x64-gnu": "0.0.1"
+    "@bvisor/linux-arm64-musl": "workspace:*",
+    "@bvisor/linux-arm64-gnu": "workspace:*",
+    "@bvisor/linux-x64-musl": "workspace:*",
+    "@bvisor/linux-x64-gnu": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.2.0",

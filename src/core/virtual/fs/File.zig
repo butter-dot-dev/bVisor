@@ -121,7 +121,7 @@ fn makedev(major: u32, minor: u32) u64 {
 }
 
 /// Convert a `linux.Statx` (internal representation used by all File backends)
-/// into the aarch64 `struct stat` ABI expected by fstat(2) callers.
+/// into the arch-specific `struct stat` ABI expected by fstat(2) callers.
 ///
 /// Only fields whose corresponding `statx.mask` bits are set are considered
 /// populated; unset fields are left as zero in the output.
@@ -138,15 +138,15 @@ pub fn statxToStat(sx: linux.Statx) Stat {
     if (sx.mask.GID) st.st_gid = sx.gid;
 
     if (sx.mask.ATIME) {
-        st.st_atime = sx.atime.sec;
+        st.st_atime = @bitCast(sx.atime.sec);
         st.st_atime_nsec = @intCast(sx.atime.nsec);
     }
     if (sx.mask.MTIME) {
-        st.st_mtime = sx.mtime.sec;
+        st.st_mtime = @bitCast(sx.mtime.sec);
         st.st_mtime_nsec = @intCast(sx.mtime.nsec);
     }
     if (sx.mask.CTIME) {
-        st.st_ctime = sx.ctime.sec;
+        st.st_ctime = @bitCast(sx.ctime.sec);
         st.st_ctime_nsec = @intCast(sx.ctime.nsec);
     }
     if (sx.mask.BLOCKS) st.st_blocks = @bitCast(sx.blocks);

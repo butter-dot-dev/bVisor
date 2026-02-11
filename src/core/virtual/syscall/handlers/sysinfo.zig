@@ -1,14 +1,11 @@
 const std = @import("std");
 const linux = std.os.linux;
-const builtin = @import("builtin");
 const Io = std.Io;
 const Supervisor = @import("../../../Supervisor.zig");
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
 const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 
-// comptime dependency injection
-const deps = @import("../../../deps/deps.zig");
-const memory_bridge = deps.memory_bridge;
+const memory_bridge = @import("../../../utils/memory_bridge.zig");
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
@@ -23,14 +20,10 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
     // Get real kernel sysinfo (memory, loads, swap, etc.)
     var info: linux.Sysinfo = undefined;
-    if (comptime builtin.is_test) {
-        info = std.mem.zeroes(linux.Sysinfo);
-    } else {
-        const rc = linux.sysinfo(&info);
-        if (linux.errno(rc) != .SUCCESS) {
-            logger.log("sysinfo: kernel sysinfo failed", .{});
-            return replyErr(notif.id, .NOSYS);
-        }
+    const rc = linux.sysinfo(&info);
+    if (linux.errno(rc) != .SUCCESS) {
+        logger.log("sysinfo: kernel sysinfo failed", .{});
+        return replyErr(notif.id, .NOSYS);
     }
 
     // Virtualize only procs and uptime
@@ -76,8 +69,7 @@ test "sysinfo returns virtualized system info" {
     try testing.expectEqual(@as(u16, 1), info.procs); // one initial thread
     try testing.expectEqual(@as(isize, 0), info.uptime);
 
-    // Kernel-sourced fields are zeroed in test mode (no real syscall)
-    try testing.expectEqual(@as(usize, 0), info.totalram);
-    try testing.expectEqual(@as(usize, 0), info.freeram);
-    try testing.expectEqual(@as(u32, 0), info.mem_unit);
+    // Kernel-sourced fields should be populated from real sysinfo()
+    try testing.expect(info.totalram > 0);
+    try testing.expect(info.mem_unit > 0);
 }

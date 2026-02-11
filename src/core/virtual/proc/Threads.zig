@@ -3,9 +3,7 @@ const builtin = @import("builtin");
 const linux = std.os.linux;
 const Allocator = std.mem.Allocator;
 
-const deps = @import("../../deps/deps.zig");
-
-const proc_info = deps.proc_info;
+const proc_info = @import("../../utils/proc_info.zig");
 pub const detectCloneFlags = proc_info.detectCloneFlags;
 pub const getStatus = proc_info.getStatus;
 pub const listTids = proc_info.listTids;
@@ -495,7 +493,7 @@ test "nested namespace - visibility rules" {
     const allocator = std.testing.allocator;
     var v_threads = Self.init(allocator);
     defer v_threads.deinit();
-    defer proc_info.testing.reset(allocator);
+    defer proc_info.mock.reset(allocator);
 
     // Create structure:
     // ns1: A -> B (B is ns2 root with CLONE_NEWPID)
@@ -509,7 +507,7 @@ test "nested namespace - visibility rules" {
     // B is TID 1 in its own namespace, 200 from root namespace view
     const b_tid = 200;
     const b_nstids = [_]NsTid{ 200, 1 };
-    try proc_info.testing.setupNsTids(allocator, b_tid, &b_nstids);
+    try proc_info.mock.setupNsTids(allocator, b_tid, &b_nstids);
     _ = try v_threads.registerChild(a_thread, b_tid, CloneFlags.from(linux.CLONE.NEWPID));
     const b_thread = v_threads.lookup.get(b_tid).?;
 
@@ -520,7 +518,7 @@ test "nested namespace - visibility rules" {
     // C is TID 2 in B's namespace, 300 from root namespace view
     const c_tid = 300;
     const c_nstids = [_]NsTid{ 300, 2 };
-    try proc_info.testing.setupNsTids(allocator, c_tid, &c_nstids);
+    try proc_info.mock.setupNsTids(allocator, c_tid, &c_nstids);
     _ = try v_threads.registerChild(b_thread, c_tid, CloneFlags.from(0));
     const c_thread = v_threads.lookup.get(c_tid).?;
     try std.testing.expect(b_thread.namespace == c_thread.namespace);
@@ -548,7 +546,7 @@ test "nested namespace - killing parent kills nested namespace" {
     const allocator = std.testing.allocator;
     var v_threads = Self.init(allocator);
     defer v_threads.deinit();
-    defer proc_info.testing.reset(allocator);
+    defer proc_info.mock.reset(allocator);
 
     // ns1: A -> B(ns2 root) -> C
     const a_tid = 100;
@@ -558,14 +556,14 @@ test "nested namespace - killing parent kills nested namespace" {
     // B: namespace root, TID 1 in its namespace
     const b_tid = 200;
     const b_nstids = [_]NsTid{ 200, 1 };
-    try proc_info.testing.setupNsTids(allocator, b_tid, &b_nstids);
+    try proc_info.mock.setupNsTids(allocator, b_tid, &b_nstids);
     _ = try v_threads.registerChild(a_thread, b_tid, CloneFlags.from(linux.CLONE.NEWPID));
     const b_thread = v_threads.lookup.get(b_tid).?;
 
     // C: TID 2 in B's namespace
     const c_tid = 300;
     const c_nstids = [_]NsTid{ 300, 2 };
-    try proc_info.testing.setupNsTids(allocator, c_tid, &c_nstids);
+    try proc_info.mock.setupNsTids(allocator, c_tid, &c_nstids);
     _ = try v_threads.registerChild(b_thread, c_tid, CloneFlags.from(0));
 
     try std.testing.expectEqual(3, v_threads.lookup.count());
@@ -583,7 +581,7 @@ test "nested namespace - killing grandparent kills all" {
     const allocator = std.testing.allocator;
     var v_threads = Self.init(allocator);
     defer v_threads.deinit();
-    defer proc_info.testing.reset(allocator);
+    defer proc_info.mock.reset(allocator);
 
     // ns1: A -> B (ns2 root) -> C -> D (ns3 root) -> E
     const a_tid = 100;
@@ -593,28 +591,28 @@ test "nested namespace - killing grandparent kills all" {
     // B: ns2 root, depth 2
     const b_tid = 200;
     const b_nstids = [_]NsTid{ 200, 1 };
-    try proc_info.testing.setupNsTids(allocator, b_tid, &b_nstids);
+    try proc_info.mock.setupNsTids(allocator, b_tid, &b_nstids);
     _ = try v_threads.registerChild(a_thread, b_tid, CloneFlags.from(linux.CLONE.NEWPID));
     const b_thread = v_threads.lookup.get(b_tid).?;
 
     // C: in ns2, depth 2
     const c_tid = 300;
     const c_nstids = [_]NsTid{ 300, 2 };
-    try proc_info.testing.setupNsTids(allocator, c_tid, &c_nstids);
+    try proc_info.mock.setupNsTids(allocator, c_tid, &c_nstids);
     _ = try v_threads.registerChild(b_thread, c_tid, CloneFlags.from(0));
     const c_thread = v_threads.lookup.get(c_tid).?;
 
     // D: ns3 root, depth 3
     const d_tid = 400;
     const d_nstids = [_]NsTid{ 400, 3, 1 };
-    try proc_info.testing.setupNsTids(allocator, d_tid, &d_nstids);
+    try proc_info.mock.setupNsTids(allocator, d_tid, &d_nstids);
     _ = try v_threads.registerChild(c_thread, d_tid, CloneFlags.from(linux.CLONE.NEWPID));
     const d_thread = v_threads.lookup.get(d_tid).?;
 
     // E: in ns3, depth 3
     const e_tid = 500;
     const e_nstids = [_]NsTid{ 500, 4, 2 };
-    try proc_info.testing.setupNsTids(allocator, e_tid, &e_nstids);
+    try proc_info.mock.setupNsTids(allocator, e_tid, &e_nstids);
     _ = try v_threads.registerChild(d_thread, e_tid, CloneFlags.from(0));
 
     try std.testing.expectEqual(5, v_threads.lookup.count());
@@ -658,14 +656,14 @@ test "can_see - child namespace cannot see parent-only threads" {
     const allocator = std.testing.allocator;
     var v_threads = Self.init(allocator);
     defer v_threads.deinit();
-    defer proc_info.testing.reset(allocator);
+    defer proc_info.mock.reset(allocator);
 
     try v_threads.handleInitialThread(100);
     const a = v_threads.lookup.get(100).?;
 
     // B is in new namespace (depth 2)
     const b_nstids = [_]NsTid{ 200, 1 };
-    try proc_info.testing.setupNsTids(allocator, 200, &b_nstids);
+    try proc_info.mock.setupNsTids(allocator, 200, &b_nstids);
     _ = try v_threads.registerChild(a, 200, CloneFlags.from(linux.CLONE.NEWPID));
     const b = v_threads.lookup.get(200).?;
 
@@ -679,7 +677,7 @@ test "deep namespace hierarchy (10 levels)" {
     const allocator = std.testing.allocator;
     var v_threads = Self.init(allocator);
     defer v_threads.deinit();
-    defer proc_info.testing.reset(allocator);
+    defer proc_info.mock.reset(allocator);
 
     const DEPTH = 10;
 
@@ -706,7 +704,7 @@ test "deep namespace hierarchy (10 levels)" {
             // This simulates different TIDs in different namespaces
             nstid_buf[j] = @intCast(tids[i] - @as(AbsTid, @intCast(j)));
         }
-        try proc_info.testing.setupNsTids(allocator, tids[i], nstid_buf[0 .. i + 1]);
+        try proc_info.mock.setupNsTids(allocator, tids[i], nstid_buf[0 .. i + 1]);
 
         _ = try v_threads.registerChild(threads[i - 1], tids[i], CloneFlags.from(linux.CLONE.NEWPID));
         threads[i] = v_threads.lookup.get(tids[i]).?;
@@ -752,7 +750,7 @@ test "wide tree with many threads per namespace" {
     const allocator = std.testing.allocator;
     var v_threads = Self.init(allocator);
     defer v_threads.deinit();
-    defer proc_info.testing.reset(allocator);
+    defer proc_info.mock.reset(allocator);
 
     const CHILDREN_PER_LEVEL = 20;
 
@@ -803,7 +801,7 @@ test "mixed namespaces: some shared, some isolated" {
     const allocator = std.testing.allocator;
     var v_threads = Self.init(allocator);
     defer v_threads.deinit();
-    defer proc_info.testing.reset(allocator);
+    defer proc_info.mock.reset(allocator);
 
     // Structure:
     // ns0: root(1) -> A(10), B(20), C(30)
@@ -828,28 +826,28 @@ test "mixed namespaces: some shared, some isolated" {
 
     // ns1: A's children in new namespace
     const a1_nstids = [_]NsTid{ 11, 1 };
-    try proc_info.testing.setupNsTids(allocator, 11, &a1_nstids);
+    try proc_info.mock.setupNsTids(allocator, 11, &a1_nstids);
     _ = try v_threads.registerChild(thread_a, 11, CloneFlags.from(linux.CLONE.NEWPID));
     const thread_a1 = v_threads.lookup.get(11).?;
 
     const a2_nstids = [_]NsTid{ 12, 2 };
-    try proc_info.testing.setupNsTids(allocator, 12, &a2_nstids);
+    try proc_info.mock.setupNsTids(allocator, 12, &a2_nstids);
     _ = try v_threads.registerChild(thread_a1, 12, CloneFlags.from(0));
     const thread_a2 = v_threads.lookup.get(12).?;
 
     // ns2: B's children in new namespace
     const b1_nstids = [_]NsTid{ 21, 1 };
-    try proc_info.testing.setupNsTids(allocator, 21, &b1_nstids);
+    try proc_info.mock.setupNsTids(allocator, 21, &b1_nstids);
     _ = try v_threads.registerChild(thread_b, 21, CloneFlags.from(linux.CLONE.NEWPID));
     const thread_b1 = v_threads.lookup.get(21).?;
 
     const b2_nstids = [_]NsTid{ 22, 2 };
-    try proc_info.testing.setupNsTids(allocator, 22, &b2_nstids);
+    try proc_info.mock.setupNsTids(allocator, 22, &b2_nstids);
     _ = try v_threads.registerChild(thread_b1, 22, CloneFlags.from(0));
 
     // ns3: nested inside ns2
     const b1a_nstids = [_]NsTid{ 211, 3, 1 }; // seen as 211 from ns0, 3 from ns2, 1 from ns3
-    try proc_info.testing.setupNsTids(allocator, 211, &b1a_nstids);
+    try proc_info.mock.setupNsTids(allocator, 211, &b1a_nstids);
     _ = try v_threads.registerChild(thread_b1, 211, CloneFlags.from(linux.CLONE.NEWPID));
     const thread_b1a = v_threads.lookup.get(211).?;
 
@@ -915,7 +913,7 @@ test "stress: verify NsTid mapping correctness across namespaces" {
     const allocator = std.testing.allocator;
     var v_threads = Self.init(allocator);
     defer v_threads.deinit();
-    defer proc_info.testing.reset(allocator);
+    defer proc_info.mock.reset(allocator);
 
     // Create: root(100) -> child(200) in new namespace
     // NStid for child: [200, 1] meaning:
@@ -926,7 +924,7 @@ test "stress: verify NsTid mapping correctness across namespaces" {
     const root = v_threads.lookup.get(100).?;
 
     const child_nstids = [_]NsTid{ 200, 1 };
-    try proc_info.testing.setupNsTids(allocator, 200, &child_nstids);
+    try proc_info.mock.setupNsTids(allocator, 200, &child_nstids);
     _ = try v_threads.registerChild(root, 200, CloneFlags.from(linux.CLONE.NEWPID));
     const child = v_threads.lookup.get(200).?;
 
@@ -952,7 +950,7 @@ test "stress: verify NsTid mapping correctness across namespaces" {
     //   - From root namespace: NsTid = 300
     //   - From child's namespace: NsTid = 2
     const grandchild_nstids = [_]NsTid{ 300, 2 };
-    try proc_info.testing.setupNsTids(allocator, 300, &grandchild_nstids);
+    try proc_info.mock.setupNsTids(allocator, 300, &grandchild_nstids);
     _ = try v_threads.registerChild(child, 300, CloneFlags.from(0));
     const grandchild = v_threads.lookup.get(300).?;
 
@@ -980,7 +978,7 @@ test "ensureRegistered registers thread and ancestors" {
     const allocator = std.testing.allocator;
     var v_threads = Self.init(allocator);
     defer v_threads.deinit();
-    defer proc_info.testing.reset(allocator);
+    defer proc_info.mock.reset(allocator);
 
     // Register initial thread 100
     try v_threads.handleInitialThread(100);
@@ -990,8 +988,8 @@ test "ensureRegistered registers thread and ancestors" {
     var status_map = std.AutoHashMap(AbsTid, ThreadStatus).init(allocator);
     defer status_map.deinit();
 
-    try proc_info.testing.setupParent(allocator, 200, 100);
-    try proc_info.testing.setupParent(allocator, 300, 200);
+    try proc_info.mock.setupParent(allocator, 200, 100);
+    try proc_info.mock.setupParent(allocator, 300, 200);
 
     const status_200 = try getStatus(200);
     const status_300 = try getStatus(300);
@@ -1019,7 +1017,7 @@ test "ensureRegistered is idempotent for already registered thread" {
     const allocator = std.testing.allocator;
     var v_threads = Self.init(allocator);
     defer v_threads.deinit();
-    defer proc_info.testing.reset(allocator);
+    defer proc_info.mock.reset(allocator);
 
     // Register initial thread 100
     try v_threads.handleInitialThread(100);

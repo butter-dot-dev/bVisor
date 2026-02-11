@@ -29,7 +29,7 @@ const fstat_handler = @import("handlers/fstatat64.zig").handle;
 
 const Stat = @import("../../types.zig").Stat;
 
-const proc_info = @import("../../deps/deps.zig").proc_info;
+const proc_info = @import("../../utils/proc_info.zig");
 
 fn makeFstatNotif(tid: AbsTid, vfd: i32, statbuf: *Stat) linux.SECCOMP.notif {
     return makeNotif(.fstatat64, .{
@@ -447,12 +447,12 @@ test "child namespace reads /proc/self -> sees NsTid 1" {
     defer stderr_buf.deinit();
     var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
-    defer proc_info.testing.reset(allocator);
+    defer proc_info.mock.reset(allocator);
 
     // Create child in new namespace
     const parent = supervisor.guest_threads.lookup.get(init_tid).?;
     const nstids = [_]NsTid{ 200, 1 };
-    try proc_info.testing.setupNsTids(allocator, 200, &nstids);
+    try proc_info.mock.setupNsTids(allocator, 200, &nstids);
     _ = try supervisor.guest_threads.registerChild(parent, 200, CloneFlags.from(linux.CLONE.NEWPID));
 
     // Child opens /proc/self
