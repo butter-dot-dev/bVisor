@@ -4,17 +4,20 @@ const builtin = @import("builtin");
 pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
+    // Callers can select an architecture to target
+    // It defaults to the host architecture
     const Arch = enum { aarch64, x86_64 };
-    const arch = b.option(Arch, "arch", "Architecture for Docker run/test (default: host)") orelse switch (builtin.cpu.arch) {
+    const arch_arg = b.option(Arch, "arch", "Architecture for Docker run/test (default: host)") orelse switch (builtin.cpu.arch) {
         .aarch64 => .aarch64,
         .x86_64 => .x86_64,
         else => @compileError("unsupported host architecture"),
     };
-    const cpu_arch: std.Target.Cpu.Arch = switch (arch) {
+    const arch: std.Target.Cpu.Arch = switch (arch_arg) {
         .aarch64 => .aarch64,
         .x86_64 => .x86_64,
     };
-    const bin_suffix: []const u8 = switch (arch) {
+
+    const bin_suffix: []const u8 = switch (arch_arg) {
         .aarch64 => "-aarch64",
         .x86_64 => "-x86_64",
     };
@@ -37,7 +40,6 @@ pub fn build(b: *std.Build) void {
     }{
         .{ .cpu_arch = .aarch64, .abi = .musl, .dest_dir = "../src/sdks/node/platforms/linux-arm64-musl" },
         .{ .cpu_arch = .aarch64, .abi = .gnu, .dest_dir = "../src/sdks/node/platforms/linux-arm64-gnu" },
-
         .{ .cpu_arch = .x86_64, .abi = .musl, .dest_dir = "../src/sdks/node/platforms/linux-x64-musl" },
         .{ .cpu_arch = .x86_64, .abi = .gnu, .dest_dir = "../src/sdks/node/platforms/linux-x64-gnu" },
     };
@@ -100,7 +102,7 @@ pub fn build(b: *std.Build) void {
             .dest_sub_path = b.fmt("bVisor{s}", .{t.suffix}),
         });
         b.getInstallStep().dependOn(&exe_install.step);
-        if (t.cpu_arch == cpu_arch) exe_install_step = &exe_install.step;
+        if (t.cpu_arch == arch) exe_install_step = &exe_install.step;
 
         const linux_tests = b.addTest(.{
             .root_module = b.createModule(.{
@@ -113,22 +115,32 @@ pub fn build(b: *std.Build) void {
             .dest_sub_path = b.fmt("tests{s}", .{t.suffix}),
         });
         b.getInstallStep().dependOn(&test_install.step);
-        if (t.cpu_arch == cpu_arch) test_install_step = &test_install.step;
+        if (t.cpu_arch == arch) test_install_step = &test_install.step;
     }
 
     // 'run' executes the sandbox in a Linux container
+    // Seccomp does not work cross-architecture due to the emulation layer
     const run_cli_step = b.step("run", "Run executable in a Linux container");
-    const run_cmd = b.addSystemCommand(&.{ "docker", "run", "--rm" });
-    if (arch == .x86_64) run_cmd.addArgs(&.{ "--platform", "linux/amd64" });
-    run_cmd.addArgs(&.{ "-v", "./zig-out:/zig-out", "alpine" });
-    run_cmd.addArg(b.fmt("/zig-out/bin/bVisor{s}", .{bin_suffix}));
-    run_cmd.step.dependOn(exe_install_step);
-    run_cli_step.dependOn(&run_cmd.step);
+    if (arch != builtin.cpu.arch) {
+        run_cli_step.dependOn(&b.addFail("zig build run requires native arch (seccomp does not work under emulation)").step);
+    } else {
+        const run_cmd = b.addSystemCommand(&.{ "docker", "run", "--rm" });
+        run_cmd.addArgs(&.{ "-v", "./zig-out:/zig-out", "alpine" });
+        run_cmd.addArg(b.fmt("/zig-out/bin/bVisor{s}", .{bin_suffix}));
+        run_cmd.step.dependOn(exe_install_step);
+        run_cli_step.dependOn(&run_cmd.step);
+    }
 
     // 'test' runs unit tests in a Linux container
     const test_cli_step = b.step("test", "Run unit tests in Docker container");
     const docker_test_cmd = b.addSystemCommand(&.{ "docker", "run", "--rm" });
-    if (arch == .x86_64) docker_test_cmd.addArgs(&.{ "--platform", "linux/amd64" });
+    if (arch != builtin.cpu.arch) {
+        if (arch == .x86_64) {
+            docker_test_cmd.addArgs(&.{ "--platform", "linux/amd64" });
+        } else if (arch == .aarch64) {
+            docker_test_cmd.addArgs(&.{ "--platform", "linux/arm64" });
+        }
+    }
     docker_test_cmd.addArgs(&.{ "-v", "./zig-out:/zig-out", "alpine" });
     docker_test_cmd.addArg(b.fmt("/zig-out/bin/tests{s}", .{bin_suffix}));
     docker_test_cmd.step.dependOn(test_install_step);
