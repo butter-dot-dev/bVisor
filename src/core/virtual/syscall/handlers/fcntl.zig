@@ -38,7 +38,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         F.GETFL => handleGetFl(notif.id, fd, caller, logger),
         F.SETFL => handleSetFl(notif.id, fd, arg, caller, logger),
 
-        // TODO: right now, we just stub these commands related to advisory locking and singal ownership
+        // TODO: right now, we just stub these commands related to advisory locking and signal ownership
         F.GETLK,
         F.SETLK,
         F.SETLKW,
