@@ -69,45 +69,77 @@ pub fn deinit(self: *Self) void {
     // LogBuffers are owned by caller, not freed here
 }
 
+const MAX_INFLIGHT = 8;
+const HandlerReturn = @typeInfo(@TypeOf(Self.handleNotif)).@"fn".return_type.?;
+
+/// Single reader loop with async dispatch for parallel syscall handling.
+/// Only one thread calls recv (avoiding a kernel bug where multiple workers
+/// competing for the recv ioctl can block forever when the seccomp filter dies).
+/// Each notification is dispatched to the Io thread pool for concurrent handling.
 pub fn run(self: *Self) !void {
-    const max_workers = 8;
-    const num_workers = @min(std.Thread.getCpuCount() catch 1, max_workers);
+    var futures: [MAX_INFLIGHT]Io.Future(HandlerReturn) = undefined;
+    var count: usize = 0;
 
-    // To build an array of futures, must get the exact type of the worker function's return value
-    const WorkerReturn = @typeInfo(@TypeOf(Self.worker)).@"fn".return_type.?;
-    const WorkerFuture = Io.Future(WorkerReturn);
-    var futures: [max_workers]WorkerFuture = undefined;
+    while (true) {
+        const notif = try self.recv() orelse break;
 
-    // Spawn workers
-    for (0..num_workers) |i| {
-        futures[i] = self.io.async(Self.worker, .{ self, i });
+        if (count >= MAX_INFLIGHT) {
+            // We have too many outstanding futures, find the first to complete (blocking until so)
+            const done = try selectFirstDone(self.io, &futures, count);
+            // Then await (nonblocking since done) to propegate any errors
+            try futures[done].await(self.io);
+            // Shift the array down to remove the completed future
+            for (done..count - 1) |i| futures[i] = futures[i + 1];
+            count -= 1;
+        }
+
+        futures[count] = self.io.async(Self.handleNotif, .{ self, notif });
+        count += 1;
     }
 
-    // Cancel workers on exit
-    defer for (futures[0..num_workers]) |*f| {
-        _ = f.cancel(self.io) catch {};
-    };
-
-    // Wait for any worker to exit
-    for (futures[0..num_workers]) |*f| {
+    for (futures[0..count]) |*f| {
         try f.await(self.io);
     }
 }
 
-/// Main notification loop. Reads syscall notifications from the kernel and responds
-/// Multiple workers may run at a single time
-fn worker(self: *Self, worker_id: usize) !void {
-    self.logger.log("Worker {d} starting", .{worker_id});
-    while (true) {
-        // Receive syscall notification from kernel
-        const notif = try self.recv() orelse return;
-        self.logger.log("Worker {d} received syscall notification", .{worker_id});
-        const resp = syscalls.handle(notif, self);
-        try self.send(resp);
+/// Wait for the first future to complete, return its index
+fn selectFirstDone(io: Io, futures: []Io.Future(HandlerReturn), count: usize) !usize {
+    // Zig's Io.select public API is a bit messy for dynamic length arrays, so
+    // we use the underlying vtable.select interface which does exactly what we need
+    // given we first convert our futures to *Io.AnyFuture
+    var any_futures: [MAX_INFLIGHT]*Io.AnyFuture = undefined;
+    for (futures[0..count], 0..) |*f, i| {
+        // *Io.AnyFuture is at .any_future, else null value implies the future is done
+        any_futures[i] = f.any_future orelse return i;
     }
+    // io.vtable.select blocks until one of the futures has a result ready
+    // it returns that index
+    return try io.vtable.select(io.userdata, any_futures[0..count]);
+}
+
+fn handleNotif(self: *Self, notif: linux.SECCOMP.notif) !void {
+    const resp = syscalls.handle(notif, self);
+    try self.send(resp);
 }
 
 fn recv(self: Self) !?linux.SECCOMP.notif {
+    // Poll the notify_fd before the recv ioctl. On some kernels, the recv
+    // ioctl's internal wait_event_interruptible condition doesn't check the
+    // seccomp filter's dead flag, causing workers to block forever after the
+    // guest exits. poll() correctly reports POLLHUP on all kernels when the
+    // filter dies.
+    var pfds = [1]linux.pollfd{.{
+        .fd = self.notify_fd,
+        .events = linux.POLL.IN,
+        .revents = 0,
+    }};
+    _ = try posix.poll(&pfds, -1);
+
+    if (pfds[0].revents & linux.POLL.IN == 0) {
+        self.logger.log("Guest exited (POLLHUP), stopping notification handler", .{});
+        return null;
+    }
+
     var notif: linux.SECCOMP.notif = std.mem.zeroes(linux.SECCOMP.notif);
     const recv_result = linux.ioctl(self.notify_fd, linux.SECCOMP.IOCTL_NOTIF.RECV, @intFromPtr(&notif));
     switch (Result(usize).from(recv_result)) {
