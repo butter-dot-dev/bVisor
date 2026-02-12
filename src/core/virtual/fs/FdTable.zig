@@ -232,6 +232,14 @@ pub fn getCloexec(self: *Self, vfd: VirtualFD) bool {
     return entry.cloexec;
 }
 
+/// Set the CLOEXEC field of an FdEntry in the table.
+/// Returns false if the vfd does not exist.
+pub fn setCloexec(self: *Self, vfd: VirtualFD, value: bool) bool {
+    const entry = self.open_files.getPtr(vfd) orelse return false;
+    entry.cloexec = value;
+    return true;
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

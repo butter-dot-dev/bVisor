@@ -29,6 +29,7 @@ backend: Backend,
 allocator: std.mem.Allocator,
 ref_count: AtomicUsize = undefined,
 opened_path: ?[]u8 = null,
+open_flags: linux.O = .{},
 
 pub fn init(allocator: std.mem.Allocator, backend: Backend) !*Self {
     const self = try allocator.create(Self);
@@ -91,6 +92,18 @@ fn close(self: *Self) void {
         .tmp => |*f| f.close(),
         .proc => |*f| f.close(),
     }
+}
+
+pub fn backingFd(self: *Self) ?posix.fd_t {
+    return switch (self.backend) {
+        .passthrough => |f| f.fd,
+        .cow => |f| switch (f) {
+            .readthrough => |fd| fd,
+            .writecopy => |fd| fd,
+        },
+        .tmp => |f| f.fd,
+        .proc => null,
+    };
 }
 
 pub fn statx(self: *Self) !linux.Statx {

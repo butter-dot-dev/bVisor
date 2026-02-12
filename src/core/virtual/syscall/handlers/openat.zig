@@ -154,6 +154,9 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
                 },
             };
 
+            // Set the File's flags
+            file.open_flags = linux_flags;
+
             // Store the opened path on the File (already normalized by resolveAndRoute)
             file.setOpenedPath(h.normalized) catch {
                 file.unref();

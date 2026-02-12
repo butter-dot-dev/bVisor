@@ -29,6 +29,7 @@ const getcwd = @import("handlers/getcwd.zig");
 const chdir = @import("handlers/chdir.zig");
 const fchdir = @import("handlers/fchdir.zig");
 const faccessat = @import("handlers/faccessat.zig");
+const fcntl = @import("handlers/fcntl.zig");
 const pipe2 = @import("handlers/pipe2.zig");
 const socket = @import("handlers/socket.zig");
 const socketpair = @import("handlers/socketpair.zig");
@@ -58,6 +59,7 @@ pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.
         .fchdir => fchdir.handle(notif, supervisor),
         .faccessat => faccessat.handle(notif, supervisor),
         .pipe2 => pipe2.handle(notif, supervisor),
+        .fcntl => fcntl.handle(notif, supervisor),
         .socket => socket.handle(notif, supervisor),
         .socketpair => socketpair.handle(notif, supervisor),
         .connect => connect.handle(notif, supervisor),
@@ -78,7 +80,6 @@ pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.
         .waitid => replyContinue(notif.id),
 
         // To implement - files
-        .fcntl,
         .ioctl,
         .getdents64,
         // To implement - process

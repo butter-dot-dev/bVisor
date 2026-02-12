@@ -44,6 +44,7 @@ test {
     _ = @import("virtual/syscall/handlers/fchdir.zig");
     _ = @import("virtual/syscall/handlers/faccessat.zig");
     _ = @import("virtual/syscall/handlers/pipe2.zig");
+    _ = @import("virtual/syscall/handlers/fcntl.zig");
     _ = @import("virtual/syscall/handlers/socket.zig");
     _ = @import("virtual/syscall/handlers/socketpair.zig");
     _ = @import("virtual/syscall/handlers/connect.zig");
