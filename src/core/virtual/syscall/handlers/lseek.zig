@@ -50,10 +50,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     return replySuccess(notif.id, new_offset);
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
 const isError = @import("../../../seccomp/notif.zig").isError;

@@ -240,10 +240,6 @@ pub fn setCloexec(self: *Self, vfd: VirtualFD, value: bool) bool {
     return true;
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 const testing = std.testing;
 const ProcFile = @import("backend/procfile.zig").ProcFile;
 

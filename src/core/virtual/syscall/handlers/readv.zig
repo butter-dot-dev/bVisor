@@ -102,10 +102,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     return replySuccess(notif.id, @intCast(n));
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 const Threads = @import("../../proc/Threads.zig");
 const FdTable = @import("../../fs/FdTable.zig");
 const ProcFileMod = @import("../../fs/backend/procfile.zig");

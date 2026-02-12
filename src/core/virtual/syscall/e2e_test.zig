@@ -76,10 +76,6 @@ fn makeCloseNotif(tid: AbsTid, vfd: i32) linux.SECCOMP.notif {
     });
 }
 
-// ============================================================================
-// E2E-01: Open proc -> read -> close (returns NsTid)
-// ============================================================================
-
 test "open proc -> read -> close returns NsTid" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
@@ -115,10 +111,6 @@ test "open proc -> read -> close returns NsTid" {
     );
     try testing.expect(!isError(close_resp));
 }
-
-// ============================================================================
-// E2E-02: Open tmp CREAT -> write -> close -> reopen RDONLY -> read -> close
-// ============================================================================
 
 test "open tmp -> write -> close -> reopen -> read -> close" {
     const allocator = testing.allocator;
@@ -179,10 +171,6 @@ test "open tmp -> write -> close -> reopen -> read -> close" {
     );
     try testing.expect(!isError(close_resp2));
 }
-
-// ============================================================================
-// E2E-06: Three files open simultaneously, each returns correct data
-// ============================================================================
 
 test "three files open simultaneously, each returns correct data" {
     const allocator = testing.allocator;
@@ -247,10 +235,6 @@ test "three files open simultaneously, each returns correct data" {
     _ = close_handler(makeCloseNotif(init_tid, tmp_vfd), &supervisor);
 }
 
-// ============================================================================
-// E2E-07: Close one of three, other two remain accessible
-// ============================================================================
-
 test "close one of three, other two remain accessible, closed one EBADF" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
@@ -309,10 +293,6 @@ test "close one of three, other two remain accessible, closed one EBADF" {
     _ = close_handler(makeCloseNotif(init_tid, vfd3), &supervisor);
 }
 
-// ============================================================================
-// E2E-08: VFD monotonicity - open close open gets next VFD
-// ============================================================================
-
 test "open -> close -> open -> second open gets next VFD (no reuse)" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
@@ -343,10 +323,6 @@ test "open -> close -> open -> second open gets next VFD (no reuse)" {
     // Second VFD should be strictly greater (no reuse)
     try testing.expect(vfd2 > vfd1);
 }
-
-// ============================================================================
-// E2E-09: CLONE_FILES fork - child sees parent's FDs
-// ============================================================================
 
 test "CLONE_FILES fork - child sees parents FDs, parent sees childs" {
     const allocator = testing.allocator;
@@ -392,10 +368,6 @@ test "CLONE_FILES fork - child sees parents FDs, parent sees childs" {
     _ = close_handler(makeCloseNotif(200, child_vfd), &supervisor);
 }
 
-// ============================================================================
-// E2E-10: Non-CLONE_FILES fork - independent tables
-// ============================================================================
-
 test "non-CLONE_FILES fork - independent tables, parent close doesnt affect child" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
@@ -434,10 +406,6 @@ test "non-CLONE_FILES fork - independent tables, parent close doesnt affect chil
     try testing.expect(child_ref2 != null);
 }
 
-// ============================================================================
-// E2E-11: Child namespace reads /proc/self -> sees NsTid in own namespace
-// ============================================================================
-
 test "child namespace reads /proc/self -> sees NsTid 1" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
@@ -475,10 +443,6 @@ test "child namespace reads /proc/self -> sees NsTid 1" {
     _ = close_handler(makeCloseNotif(200, vfd), &supervisor);
 }
 
-// ============================================================================
-// E2E-12: openat with traversal through /tmp to /sys -> blocked EPERM
-// ============================================================================
-
 test "openat /tmp/../sys/class/net normalizes to blocked EPERM" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
@@ -496,10 +460,6 @@ test "openat /tmp/../sys/class/net normalizes to blocked EPERM" {
     try testing.expect(isError(resp));
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.PERM))), resp.@"error");
 }
-
-// ============================================================================
-// E2E-15: Unknown VFD returns EBADF across read, write, readv, writev, close
-// ============================================================================
 
 test "unknown VFD returns EBADF across all handlers" {
     const allocator = testing.allocator;
@@ -569,10 +529,6 @@ test "unknown VFD returns EBADF across all handlers" {
     try testing.expectEqual(ebadf, writev_resp.@"error");
 }
 
-// ============================================================================
-// E2E-16: Unknown PID returns ESRCH across all handlers
-// ============================================================================
-
 test "unknown PID returns ESRCH across all handlers" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
@@ -617,10 +573,6 @@ test "unknown PID returns ESRCH across all handlers" {
     try testing.expectEqual(esrch, close_resp.@"error");
 }
 
-// ============================================================================
-// E2E: fstat on /proc/self returns correct struct stat fields
-// ============================================================================
-
 test "fstat on proc file writes correct struct stat" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
@@ -658,10 +610,6 @@ test "fstat on proc file writes correct struct stat" {
     _ = close_handler(makeCloseNotif(init_tid, vfd), &supervisor);
 }
 
-// ============================================================================
-// E2E: fstat on stdio fd returns continue (passthrough)
-// ============================================================================
-
 test "fstat on stdio fd returns continue" {
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
@@ -686,10 +634,6 @@ test "fstat on stdio fd returns continue" {
     const resp2 = fstat_handler(makeFstatNotif(init_tid, 2, &stat_buf), &supervisor);
     try testing.expect(isContinue(resp2));
 }
-
-// ============================================================================
-// E2E: fstat on unknown VFD returns EBADF
-// ============================================================================
 
 test "fstat on unknown VFD returns EBADF" {
     const allocator = testing.allocator;

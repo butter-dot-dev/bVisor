@@ -17,7 +17,7 @@ pub const Tmp = struct {
     pub fn open(overlay: *OverlayRoot, path: []const u8, flags: posix.O, mode: posix.mode_t) !Tmp {
         var buf: [512]u8 = undefined;
         const resolved = try overlay.resolveTmp(path, &buf);
-        const fd = try posix.openat(linux.AT.FDCWD,resolved, flags, mode);
+        const fd = try posix.openat(linux.AT.FDCWD, resolved, flags, mode);
         return .{ .fd = fd };
     }
 
@@ -55,7 +55,7 @@ pub const Tmp = struct {
         var resolve_buf: [512]u8 = undefined;
         const resolved = try overlay.resolveTmp(path, &resolve_buf);
 
-        const fd = try posix.openat(linux.AT.FDCWD,resolved, .{ .PATH = true }, 0);
+        const fd = try posix.openat(linux.AT.FDCWD, resolved, .{ .PATH = true }, 0);
         defer posix.close(fd);
 
         var statx_buf: linux.Statx = std.mem.zeroes(linux.Statx);
@@ -86,10 +86,6 @@ pub const Tmp = struct {
         return error.NotASocket;
     }
 };
-
-// ============================================================================
-// Tests
-// ============================================================================
 
 const testing = std.testing;
 
