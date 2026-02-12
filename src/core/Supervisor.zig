@@ -109,6 +109,7 @@ fn selectFirstDone(io: Io, futures: []Io.Future(HandlerReturn), count: usize) !u
     // given we first convert our futures to *Io.AnyFuture
     var any_futures: [MAX_INFLIGHT]*Io.AnyFuture = undefined;
     for (futures[0..count], 0..) |*f, i| {
+        // *Io.AnyFuture is at .any_future, else null value implies the future is done
         any_futures[i] = f.any_future orelse return i;
     }
     // io.vtable.select blocks until one of the futures has a result ready
