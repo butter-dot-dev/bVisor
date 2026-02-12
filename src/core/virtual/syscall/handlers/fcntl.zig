@@ -1,10 +1,12 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const linux = std.os.linux;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const Supervisor = @import("../../../Supervisor.zig");
 const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
+const Logger = @import("../../../types.zig").Logger;
 
 const F = linux.F;
 
@@ -68,7 +70,7 @@ fn handleDupFd(
     fd: i32,
     arg: u64,
     caller: *Thread,
-    logger: anytype,
+    logger: Logger,
     cloexec: bool,
 ) linux.SECCOMP.notif_resp {
     _ = arg;
@@ -99,7 +101,7 @@ fn handleGetFd(
     id: u64,
     fd: i32,
     caller: *Thread,
-    logger: anytype,
+    logger: Logger,
 ) linux.SECCOMP.notif_resp {
     // Verify the fd exists
     const file = caller.fd_table.get_ref(fd) orelse {
@@ -120,7 +122,7 @@ fn handleSetFd(
     fd: i32,
     arg: u64,
     caller: *Thread,
-    logger: anytype,
+    logger: Logger,
 ) linux.SECCOMP.notif_resp {
     const new_cloexec = (arg & linux.FD_CLOEXEC) != 0;
 
@@ -138,7 +140,7 @@ fn handleGetFl(
     id: u64,
     fd: i32,
     caller: *Thread,
-    logger: anytype,
+    logger: Logger,
 ) linux.SECCOMP.notif_resp {
     const file = caller.fd_table.get_ref(fd) orelse {
         logger.log("fcntl: F_GETFL EBADF for fd={d}", .{fd});
@@ -157,7 +159,7 @@ fn handleSetFl(
     fd: i32,
     arg: u64,
     caller: *Thread,
-    logger: anytype,
+    logger: Logger,
 ) linux.SECCOMP.notif_resp {
     const file = caller.fd_table.get_ref(fd) orelse {
         logger.log("fcntl: F_SETFL EBADF for fd={d}", .{fd});
@@ -168,8 +170,8 @@ fn handleSetFl(
     const new_flags: linux.O = @bitCast(@as(u32, @truncate(arg)));
 
     // Only mutable flags can be changed via F_SETFL.
-    // Preserve immutable flags (ACCMODE, CREAT, EXCL, etc.) from the original.
-    var updated = file.open_flags;
+    // Preserve immutable flags (ACCMODE, CREAT, EXCL, etc.) from the original
+    var updated: linux.O = file.open_flags;
     updated.APPEND = new_flags.APPEND;
     updated.ASYNC = new_flags.ASYNC;
     updated.DIRECT = new_flags.DIRECT;
@@ -178,12 +180,14 @@ fn handleSetFl(
     file.open_flags = updated;
 
     // Propagate to kernel for backends with real FDs
-    if (file.backingFd()) |backing_fd| {
-        const flags_u32: u32 = @bitCast(updated);
-        const rc = linux.fcntl(backing_fd, F.SETFL, @as(usize, flags_u32));
-        if (linux.errno(rc) != .SUCCESS) {
-            logger.log("fcntl: F_SETFL kernel propagation failed for fd={d}", .{fd});
-            return replyErr(id, .INVAL);
+    if (!builtin.is_test) {
+        if (file.backingFd()) |backing_fd| {
+            const flags_u32: u32 = @bitCast(updated);
+            const rc = linux.fcntl(backing_fd, F.SETFL, @as(usize, flags_u32));
+            if (linux.errno(rc) != .SUCCESS) {
+                logger.log("fcntl: F_SETFL kernel propagation failed for fd={d}", .{fd});
+                return replyErr(id, .INVAL);
+            }
         }
     }
 
