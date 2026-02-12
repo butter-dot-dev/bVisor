@@ -24,18 +24,18 @@ pub const Cow = union(enum) {
         if (cow_exists) {
             // COW copy already exists - open it directly
             const cow_path = try overlay.resolveCow(path, &cow_path_buf);
-            const cow_fd = try posix.openat(linux.AT.FDCWD,cow_path, flags, mode);
+            const cow_fd = try posix.openat(linux.AT.FDCWD, cow_path, flags, mode);
             return .{ .writecopy = cow_fd };
         } else if (has_write_flags) {
             // First write to this file - copy original to cow, then open
             const cow_path = try overlay.resolveCow(path, &cow_path_buf);
             try overlay.createCowParentDirs(path);
             try copyFile(path, cow_path);
-            const cow_fd = try posix.openat(linux.AT.FDCWD,cow_path, flags, mode);
+            const cow_fd = try posix.openat(linux.AT.FDCWD, cow_path, flags, mode);
             return .{ .writecopy = cow_fd };
         } else {
             // Read-only, no cow exists - readthrough to original
-            const readthrough_fd = try posix.openat(linux.AT.FDCWD,path, flags, mode);
+            const readthrough_fd = try posix.openat(linux.AT.FDCWD, path, flags, mode);
             return .{ .readthrough = readthrough_fd };
         }
     }
@@ -90,7 +90,7 @@ pub const Cow = union(enum) {
         else
             path;
 
-        const fd = try posix.openat(linux.AT.FDCWD,real_path, .{ .PATH = true }, 0);
+        const fd = try posix.openat(linux.AT.FDCWD, real_path, .{ .PATH = true }, 0);
         defer posix.close(fd);
 
         var statx_buf: linux.Statx = std.mem.zeroes(linux.Statx);
@@ -127,10 +127,10 @@ pub const Cow = union(enum) {
 
 /// Copy a file from src to dst using posix calls.
 fn copyFile(src: []const u8, dst: []const u8) !void {
-    const src_fd = try posix.openat(linux.AT.FDCWD,src, .{ .ACCMODE = .RDONLY }, 0);
+    const src_fd = try posix.openat(linux.AT.FDCWD, src, .{ .ACCMODE = .RDONLY }, 0);
     defer posix.close(src_fd);
 
-    const dst_fd = try posix.openat(linux.AT.FDCWD,dst, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
+    const dst_fd = try posix.openat(linux.AT.FDCWD, dst, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
     defer posix.close(dst_fd);
 
     var buf: [4096]u8 = undefined;
@@ -230,7 +230,7 @@ test "write to writecopy succeeds and leaves original untouched" {
     }
 
     // Verify original ls_clone_path is unchanged by opening directly
-    const original_fd = try posix.openat(linux.AT.FDCWD,ls_clone_path, .{ .ACCMODE = .RDONLY }, 0);
+    const original_fd = try posix.openat(linux.AT.FDCWD, ls_clone_path, .{ .ACCMODE = .RDONLY }, 0);
     defer posix.close(original_fd);
     var verify_buf: [16]u8 = undefined;
     _ = try posix.read(original_fd, &verify_buf);
@@ -265,7 +265,7 @@ test "read from readthrough returns original file content" {
     const cow_n = try file.read(&cow_buf);
 
     // Read original directly for comparison
-    const orig_fd = try posix.openat(linux.AT.FDCWD,ls_path, .{ .ACCMODE = .RDONLY }, 0);
+    const orig_fd = try posix.openat(linux.AT.FDCWD, ls_path, .{ .ACCMODE = .RDONLY }, 0);
     defer posix.close(orig_fd);
     var orig_buf: [16]u8 = undefined;
     const orig_n = try posix.read(orig_fd, &orig_buf);
@@ -291,7 +291,7 @@ test "read from writecopy after write+reopen returns modified content" {
 
     const src_path = "/tmp/bvisor_test_cow06";
     {
-        const fd = try posix.openat(linux.AT.FDCWD,src_path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
+        const fd = try posix.openat(linux.AT.FDCWD, src_path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
         defer posix.close(fd);
         _ = try sysWrite(fd, "original content");
     }
@@ -323,7 +323,7 @@ test "successive write opens accumulate on single COW copy" {
 
     const src_path = "/tmp/bvisor_test_cow10";
     {
-        const fd = try posix.openat(linux.AT.FDCWD,src_path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
+        const fd = try posix.openat(linux.AT.FDCWD, src_path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
         defer posix.close(fd);
         _ = try sysWrite(fd, "initial");
     }
@@ -438,7 +438,7 @@ test "COW open deep path creates parent dirs in overlay" {
     // Create a deep source file
     const deep_path = "/tmp/bvisor_test_cow19_src";
     {
-        const fd = try posix.openat(linux.AT.FDCWD,deep_path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
+        const fd = try posix.openat(linux.AT.FDCWD, deep_path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
         defer posix.close(fd);
         _ = try sysWrite(fd, "deep content");
     }
@@ -477,7 +477,7 @@ test "two overlays COW same path -> independent copies, original untouched" {
 
     const src_path = "/tmp/bvisor_test_cow22";
     {
-        const fd = try posix.openat(linux.AT.FDCWD,src_path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
+        const fd = try posix.openat(linux.AT.FDCWD, src_path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
         defer posix.close(fd);
         _ = try sysWrite(fd, "original");
     }
@@ -517,7 +517,7 @@ test "two overlays COW same path -> independent copies, original untouched" {
 
     // Verify original is untouched
     {
-        const fd = try posix.openat(linux.AT.FDCWD,src_path, .{ .ACCMODE = .RDONLY }, 0);
+        const fd = try posix.openat(linux.AT.FDCWD, src_path, .{ .ACCMODE = .RDONLY }, 0);
         defer posix.close(fd);
         const n = try posix.read(fd, &buf);
         try testing.expectEqualStrings("original", buf[0..n]);
