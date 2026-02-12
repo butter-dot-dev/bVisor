@@ -45,6 +45,8 @@ test {
     _ = @import("virtual/syscall/handlers/faccessat.zig");
     _ = @import("virtual/syscall/handlers/pipe2.zig");
     _ = @import("virtual/syscall/handlers/fcntl.zig");
+    _ = @import("virtual/syscall/handlers/socket.zig");
+    _ = @import("virtual/syscall/handlers/socketpair.zig");
     _ = @import("virtual/syscall/e2e_test.zig");
     _ = @import("virtual/OverlayRoot.zig");
     _ = @import("virtual/fs/backend/passthrough.zig");
