@@ -156,7 +156,7 @@ All tests run in Docker (`zig build test`). The test binary is cross-compiled fo
 
 ## Zig Guidelines
 - Zig 0.16 is required, and includes a new `std.Io` module that provides a unified interface for asynchronous I/O.
-- The std lib can be found in the same directory as the Zig binary, plus ./lib/std. Use grep to find the current APIs. If further documentation is needed, use https://ziglang.org/documentation/master/std/ as a reference.
+- We use `anyzig`, a CLI aliased as `zig` which ensures we are using the correct version of Zig. `zig build` etc runs as expected. To find the std lib source code, use `anyzig env` to find the path to the std lib. If further documentation is needed, use https://ziglang.org/documentation/master/std/ as a reference.
 - Use the installed ZLS language server for up-to-date feedback on 0.16 features.
 - Where possible, keep structs as individual files, using the file-as-struct pattern with `const Self = @This()`.
 - Prefer the `try` keyword over `catch` when possible.
