@@ -1,6 +1,5 @@
 const std = @import("std");
 const linux = std.os.linux;
-const posix = std.posix;
 const Supervisor = @import("../../../Supervisor.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 const LogBuffer = @import("../../../LogBuffer.zig");
@@ -55,15 +54,11 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     }
 
     // Execute real kill syscall outside the lock
-    const sig: posix.SIG = @enumFromInt(signal);
-    posix.kill(@intCast(target_abstgid), sig) catch |err| {
-        const errno: linux.E = switch (err) {
-            error.PermissionDenied => .PERM,
-            error.ProcessNotFound => .SRCH,
-            else => .INVAL,
-        };
+    const rc = linux.kill(@intCast(target_abstgid), @enumFromInt(signal));
+    const errno = linux.errno(rc);
+    if (errno != .SUCCESS) {
         return replyErr(notif.id, errno);
-    };
+    }
 
     // Do not remove from internal Threads tracking.
     // Killing a thread is just a signal invocation.

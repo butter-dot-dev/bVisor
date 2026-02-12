@@ -1,6 +1,5 @@
 const std = @import("std");
 const linux = std.os.linux;
-const posix = std.posix;
 const types = @import("../types.zig");
 const Result = types.LinuxResult;
 
@@ -35,7 +34,8 @@ pub fn install() !linux.fd_t {
 
     // Set NO_NEW_PRIVS mode
     // Required before installing seccomp filter
-    _ = try posix.prctl(posix.PR.SET_NO_NEW_PRIVS, .{ 1, 0, 0, 0 });
+    const prctl_rc = linux.prctl(@intFromEnum(linux.PR.SET_NO_NEW_PRIVS), 1, 0, 0, 0);
+    if (linux.errno(prctl_rc) != .SUCCESS) return error.SyscallFailed;
 
     return try Result(linux.fd_t).from(
         linux.seccomp(

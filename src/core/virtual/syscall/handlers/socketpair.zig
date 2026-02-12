@@ -31,15 +31,15 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
     // Wrap both ends as passthrough Files
     const file0 = File.init(allocator, .{ .passthrough = .{ .fd = kernel_fds[0] } }) catch {
-        _ = std.posix.system.close(kernel_fds[0]);
-        _ = std.posix.system.close(kernel_fds[1]);
+        _ = linux.close(kernel_fds[0]);
+        _ = linux.close(kernel_fds[1]);
         logger.log("socketpair: failed to alloc File 0", .{});
         return replyErr(notif.id, .NOMEM);
     };
 
     const file1 = File.init(allocator, .{ .passthrough = .{ .fd = kernel_fds[1] } }) catch {
         file0.unref();
-        _ = std.posix.system.close(kernel_fds[1]);
+        _ = linux.close(kernel_fds[1]);
         logger.log("socketpair: failed to alloc File 1", .{});
         return replyErr(notif.id, .NOMEM);
     };

@@ -1,5 +1,4 @@
 const std = @import("std");
-const posix = std.posix;
 const linux = std.os.linux;
 const types = @import("types.zig");
 const seccomp = @import("seccomp/filter.zig");
@@ -19,7 +18,7 @@ pub fn execute(allocator: Allocator, io: Io, uid: [16]u8, runnable: *const fn ()
     const dup_rc = linux.dup(0);
     if (linux.errno(dup_rc) != .SUCCESS) return error.SyscallFailed;
     const expected_notify_fd: linux.fd_t = @intCast(dup_rc);
-    posix.close(expected_notify_fd);
+    _ = linux.close(expected_notify_fd);
 
     const fork_rc = linux.fork();
     if (linux.errno(fork_rc) != .SUCCESS) return error.SyscallFailed;

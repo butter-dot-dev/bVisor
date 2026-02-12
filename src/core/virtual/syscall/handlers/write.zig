@@ -1,6 +1,5 @@
 const std = @import("std");
 const linux = std.os.linux;
-const posix = std.posix;
 const types = @import("../../../types.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;

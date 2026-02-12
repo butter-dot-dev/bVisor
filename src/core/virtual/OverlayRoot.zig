@@ -1,8 +1,22 @@
 const std = @import("std");
 const linux = std.os.linux;
-const posix = std.posix;
 
 const Self = @This();
+
+fn sysOpenat(path: []const u8, flags: linux.O, mode: linux.mode_t) !linux.fd_t {
+    var path_buf: [513]u8 = undefined;
+    if (path.len > 512) return error.NameTooLong;
+    @memcpy(path_buf[0..path.len], path);
+    path_buf[path.len] = 0;
+    const rc = linux.openat(linux.AT.FDCWD, path_buf[0..path.len :0], flags, mode);
+    const errno = linux.errno(rc);
+    if (errno != .SUCCESS) return switch (errno) {
+        .NOENT => error.FileNotFound,
+        .ACCES, .PERM => error.AccessDenied,
+        else => error.SyscallFailed,
+    };
+    return @intCast(rc);
+}
 
 uid: [16]u8,
 root_path_buf: [root_fmt_str.len + 16]u8,
@@ -83,8 +97,8 @@ pub fn cowExists(self: *const Self, path: []const u8) bool {
     var buf: [512]u8 = undefined;
     const cow_path = self.resolveCow(path, &buf) catch return false;
     // Try to open the file - if it succeeds, it exists
-    const fd = posix.openat(linux.AT.FDCWD, cow_path, .{ .ACCMODE = .RDONLY }, 0) catch return false;
-    posix.close(fd);
+    const fd = sysOpenat(cow_path, .{ .ACCMODE = .RDONLY }, 0) catch return false;
+    _ = linux.close(fd);
     return true;
 }
 
@@ -177,8 +191,8 @@ test "cowExists after creating COW copy returns true" {
     try overlay.createCowParentDirs("/etc/passwd");
     var buf: [512]u8 = undefined;
     const cow_path = try overlay.resolveCow("/etc/passwd", &buf);
-    const fd = try posix.openat(linux.AT.FDCWD, cow_path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
-    posix.close(fd);
+    const fd = try sysOpenat(cow_path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
+    _ = linux.close(fd);
 
     try testing.expect(overlay.cowExists("/etc/passwd"));
 }

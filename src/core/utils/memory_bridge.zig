@@ -1,7 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const linux = std.os.linux;
-const posix = std.posix;
+const iovec = std.posix.iovec;
+const iovec_const = std.posix.iovec_const;
 const types = @import("../types.zig");
 const LinuxResult = types.LinuxResult;
 
@@ -14,12 +15,12 @@ pub inline fn read(T: type, child_pid: linux.pid_t, child_addr: u64) !T {
         return ptr.*;
     }
 
-    const child_iovec: [1]posix.iovec_const = .{.{
+    const child_iovec: [1]iovec_const = .{.{
         .base = @ptrFromInt(child_addr),
         .len = @sizeOf(T),
     }};
     var local_T: T = undefined;
-    const local_iovec: [1]posix.iovec = .{.{
+    const local_iovec: [1]iovec = .{.{
         .base = @ptrCast(&local_T),
         .len = @sizeOf(T),
     }};
@@ -38,11 +39,11 @@ pub inline fn readSlice(dest: []u8, child_pid: linux.pid_t, child_addr: u64) !vo
         return;
     }
 
-    const child_iovec: [1]posix.iovec_const = .{.{
+    const child_iovec: [1]iovec_const = .{.{
         .base = @ptrFromInt(child_addr),
         .len = dest.len,
     }};
-    const local_iovec: [1]posix.iovec = .{.{
+    const local_iovec: [1]iovec = .{.{
         .base = dest.ptr,
         .len = dest.len,
     }};
@@ -70,11 +71,11 @@ pub inline fn write(T: type, child_pid: linux.pid_t, val: T, child_addr: u64) !v
         return;
     }
 
-    const local_iovec: [1]posix.iovec_const = .{.{
+    const local_iovec: [1]iovec_const = .{.{
         .base = @ptrCast(&val),
         .len = @sizeOf(T),
     }};
-    const child_iovec: [1]posix.iovec_const = .{.{
+    const child_iovec: [1]iovec_const = .{.{
         .base = @ptrFromInt(child_addr),
         .len = @sizeOf(T),
     }};
@@ -92,11 +93,11 @@ pub inline fn writeSlice(src: []const u8, child_pid: linux.pid_t, child_addr: u6
         return;
     }
 
-    const local_iovec: [1]posix.iovec_const = .{.{
+    const local_iovec: [1]iovec_const = .{.{
         .base = src.ptr,
         .len = src.len,
     }};
-    const child_iovec: [1]posix.iovec_const = .{.{
+    const child_iovec: [1]iovec_const = .{.{
         .base = @ptrFromInt(child_addr),
         .len = src.len,
     }};

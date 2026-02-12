@@ -29,7 +29,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
     // Wrap as passthrough File
     const file = File.init(allocator, .{ .passthrough = .{ .fd = kernel_fd } }) catch {
-        _ = std.posix.system.close(kernel_fd);
+        _ = linux.close(kernel_fd);
         logger.log("socket: failed to alloc File", .{});
         return replyErr(notif.id, .NOMEM);
     };

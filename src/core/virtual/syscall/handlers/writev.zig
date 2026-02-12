@@ -1,6 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
-const posix = std.posix;
+const iovec_const = std.posix.iovec_const;
 const types = @import("../../../types.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
@@ -26,13 +26,13 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
     // Virtualize stdout/stderr: gather iovecs and capture into log buffer
     if (fd == linux.STDOUT_FILENO or fd == linux.STDERR_FILENO) {
-        var stdio_iovecs: [MAX_IOV]posix.iovec_const = undefined;
+        var stdio_iovecs: [MAX_IOV]iovec_const = undefined;
         var stdio_buf: [4096]u8 = undefined;
         var stdio_len: usize = 0;
 
         for (0..iovec_count) |i| {
-            const iov_addr = iovec_ptr + i * @sizeOf(posix.iovec_const);
-            stdio_iovecs[i] = memory_bridge.read(posix.iovec_const, caller_tid, iov_addr) catch {
+            const iov_addr = iovec_ptr + i * @sizeOf(iovec_const);
+            stdio_iovecs[i] = memory_bridge.read(iovec_const, caller_tid, iov_addr) catch {
                 return replyErr(notif.id, .FAULT);
             };
         }
@@ -83,13 +83,13 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     defer file.unref();
 
     // Read iovec array from child memory
-    var iovecs: [MAX_IOV]posix.iovec_const = undefined;
+    var iovecs: [MAX_IOV]iovec_const = undefined;
     var data_buf: [4096]u8 = undefined;
     var data_len: usize = 0;
 
     for (0..iovec_count) |i| {
-        const iov_addr = iovec_ptr + i * @sizeOf(posix.iovec_const);
-        iovecs[i] = memory_bridge.read(posix.iovec_const, caller_tid, iov_addr) catch {
+        const iov_addr = iovec_ptr + i * @sizeOf(iovec_const);
+        iovecs[i] = memory_bridge.read(iovec_const, caller_tid, iov_addr) catch {
             return replyErr(notif.id, .FAULT);
         };
     }
@@ -146,7 +146,7 @@ test "writev single iovec writes data" {
     const vfd = try caller.fd_table.insert(try File.init(allocator, .{ .tmp = tmp_file }), .{});
 
     const data = "hello";
-    var iovecs = [_]posix.iovec_const{
+    var iovecs = [_]iovec_const{
         .{ .base = data.ptr, .len = data.len },
     };
 
@@ -180,7 +180,7 @@ test "writev multiple iovecs concatenated write" {
     const d1 = "hel";
     const d2 = "lo ";
     const d3 = "world";
-    var iovecs = [_]posix.iovec_const{
+    var iovecs = [_]iovec_const{
         .{ .base = d1.ptr, .len = d1.len },
         .{ .base = d2.ptr, .len = d2.len },
         .{ .base = d3.ptr, .len = d3.len },
@@ -211,7 +211,7 @@ test "writev FD 1 (stdout) captures into log buffer" {
     defer supervisor.deinit();
 
     const data = "hello";
-    var iovecs = [_]posix.iovec_const{
+    var iovecs = [_]iovec_const{
         .{ .base = data.ptr, .len = data.len },
     };
 
@@ -240,7 +240,7 @@ test "writev FD 2 (stderr) captures into log buffer" {
     defer supervisor.deinit();
 
     const data = "error";
-    var iovecs = [_]posix.iovec_const{
+    var iovecs = [_]iovec_const{
         .{ .base = data.ptr, .len = data.len },
     };
 
@@ -271,7 +271,7 @@ test "writev stdout: write, write, drain, write, drain" {
     // writev "hel" + "lo "
     const d1a = "hel";
     const d1b = "lo ";
-    var iovecs1 = [_]posix.iovec_const{
+    var iovecs1 = [_]iovec_const{
         .{ .base = d1a.ptr, .len = d1a.len },
         .{ .base = d1b.ptr, .len = d1b.len },
     };
@@ -285,7 +285,7 @@ test "writev stdout: write, write, drain, write, drain" {
 
     // writev "world"
     const d2 = "world";
-    var iovecs2 = [_]posix.iovec_const{
+    var iovecs2 = [_]iovec_const{
         .{ .base = d2.ptr, .len = d2.len },
     };
     const r2 = handle(makeNotif(.writev, .{
@@ -303,7 +303,7 @@ test "writev stdout: write, write, drain, write, drain" {
 
     // writev "!"
     const d3 = "!";
-    var iovecs3 = [_]posix.iovec_const{
+    var iovecs3 = [_]iovec_const{
         .{ .base = d3.ptr, .len = d3.len },
     };
     const r3 = handle(makeNotif(.writev, .{
@@ -332,7 +332,7 @@ test "writev non-existent VFD returns EBADF" {
     defer supervisor.deinit();
 
     const data = "hello";
-    var iovecs = [_]posix.iovec_const{
+    var iovecs = [_]iovec_const{
         .{ .base = data.ptr, .len = data.len },
     };
 

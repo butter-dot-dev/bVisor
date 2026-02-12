@@ -1,6 +1,5 @@
 const std = @import("std");
 const linux = std.os.linux;
-const posix = std.posix;
 
 const Supervisor = @import("../../../Supervisor.zig");
 const Thread = @import("../../proc/Thread.zig");
@@ -30,9 +29,10 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     while (tg_iter.next()) |entry| {
         const thread = entry.value_ptr.*;
         if (thread != caller) {
-            std.posix.kill(thread.tid, .KILL) catch |err| {
-                std.log.debug("exit_group: posix.kill({d}): {}", .{ thread.tid, err });
-            };
+            const rc = linux.kill(thread.tid, linux.SIG.KILL);
+            if (linux.errno(rc) != .SUCCESS) {
+                std.log.debug("exit_group: kill({d}): {s}", .{ thread.tid, @tagName(linux.errno(rc)) });
+            }
         }
     }
 

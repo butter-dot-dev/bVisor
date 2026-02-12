@@ -1,6 +1,5 @@
 const std = @import("std");
 const linux = std.os.linux;
-const posix = std.posix;
 const Allocator = std.mem.Allocator;
 
 const Supervisor = @import("../../../Supervisor.zig");
@@ -34,9 +33,10 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
             const thread = entry.value_ptr.*;
             if (thread != caller) {
                 // Send SIGKILL for any descendants (which will trigger other `exit` syscalls via the kernel)
-                posix.kill(thread.tid, .KILL) catch |err| {
-                    std.log.debug("exit: posix.kill({d}) during namespace cleanup: {}", .{ thread.tid, err });
-                };
+                const rc = linux.kill(thread.tid, linux.SIG.KILL);
+                if (linux.errno(rc) != .SUCCESS) {
+                    std.log.debug("exit: kill({d}) during namespace cleanup: {s}", .{ thread.tid, @tagName(linux.errno(rc)) });
+                }
             }
         }
     }

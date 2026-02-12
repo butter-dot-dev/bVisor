@@ -1,9 +1,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const linux = std.os.linux;
 const types = @import("../../types.zig");
 const File = @import("File.zig");
 const FdEntry = @import("FdEntry.zig").FdEntry;
-const posix = std.posix;
 
 /// Virtual file descriptor - the fd number visible to the sandboxed process.
 /// We manage all fd allocation, so these start at 3 (after stdin/stdout/stderr).
@@ -252,7 +252,7 @@ test "insert returns incrementing vfds starting at 3" {
     defer table.unref();
 
     for (0..10) |i| {
-        const actual_fd: posix.fd_t = @intCast(100 + i);
+        const actual_fd: linux.fd_t = @intCast(100 + i);
         const expected_virtual_fd: VirtualFD = @intCast(3 + i);
         const file = try File.init(testing.allocator, .{ .passthrough = .{ .fd = actual_fd } });
         const vfd = try table.insert(file, .{});
@@ -491,7 +491,7 @@ test "insert 1000 files returns all unique VFDs and all retrievable" {
     const fd_offset = 1000;
     var vfds: [1000]VirtualFD = undefined;
     for (0..1000) |i| {
-        const fd: posix.fd_t = @intCast(fd_offset + i);
+        const fd: linux.fd_t = @intCast(fd_offset + i);
         vfds[i] = try table.insert(try File.init(testing.allocator, .{ .passthrough = .{ .fd = fd } }), .{});
     }
 

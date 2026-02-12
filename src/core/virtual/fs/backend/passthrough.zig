@@ -1,7 +1,27 @@
 const std = @import("std");
 const linux = std.os.linux;
-const posix = std.posix;
 const OverlayRoot = @import("../../OverlayRoot.zig");
+
+fn sysOpenat(path: []const u8, flags: linux.O, mode: linux.mode_t) !linux.fd_t {
+    var path_buf: [513]u8 = undefined;
+    if (path.len > 512) return error.NameTooLong;
+    @memcpy(path_buf[0..path.len], path);
+    path_buf[path.len] = 0;
+    const rc = linux.openat(linux.AT.FDCWD, path_buf[0..path.len :0], flags, mode);
+    const errno = linux.errno(rc);
+    if (errno != .SUCCESS) return switch (errno) {
+        .NOENT => error.FileNotFound,
+        .ACCES, .PERM => error.AccessDenied,
+        else => error.SyscallFailed,
+    };
+    return @intCast(rc);
+}
+
+fn sysRead(fd: linux.fd_t, buf: []u8) !usize {
+    const rc = linux.read(fd, buf.ptr, buf.len);
+    if (linux.errno(rc) != .SUCCESS) return error.SyscallFailed;
+    return rc;
+}
 
 fn sysWrite(fd: linux.fd_t, data: []const u8) !usize {
     const rc = linux.write(fd, data.ptr, data.len);
@@ -12,25 +32,24 @@ fn sysWrite(fd: linux.fd_t, data: []const u8) !usize {
 /// Passthrough backend - directly wraps a kernel file descriptor.
 /// Used for safe device files like /dev/null, /dev/zero, /dev/urandom.
 pub const Passthrough = struct {
-    fd: posix.fd_t,
+    fd: linux.fd_t,
 
-    pub fn open(_: *OverlayRoot, path: []const u8, flags: posix.O, mode: posix.mode_t) !Passthrough {
-        const fd = try posix.openat(linux.AT.FDCWD,path, flags, mode);
+    pub fn open(_: *OverlayRoot, path: []const u8, flags: linux.O, mode: linux.mode_t) !Passthrough {
+        const fd = try sysOpenat(path, flags, mode);
         return .{ .fd = fd };
     }
 
     pub fn read(self: *Passthrough, buf: []u8) !usize {
-        return posix.read(self.fd, buf);
+        return sysRead(self.fd, buf);
     }
 
     pub fn write(self: *Passthrough, data: []const u8) !usize {
         return sysWrite(self.fd, data);
     }
 
-    // Use system.close instead of posix.close: posix.close panics on EBADF,
-    // but tests create Files with fake fds that were never opened.
+    // Ignores EBADF — tests create Files with fake fds that were never opened
     pub fn close(self: *Passthrough) void {
-        _ = std.posix.system.close(self.fd);
+        _ = linux.close(self.fd);
     }
 
     pub fn statx(self: *Passthrough) !linux.Statx {
@@ -50,8 +69,8 @@ pub const Passthrough = struct {
         if (comptime builtin.os.tag != .linux) return error.StatxFail;
 
         // Open O_PATH (no permissions needed, works on any file type)
-        const fd = try posix.openat(linux.AT.FDCWD,path, .{ .PATH = true }, 0);
-        defer posix.close(fd);
+        const fd = try sysOpenat(path, .{ .PATH = true }, 0);
+        defer _ = linux.close(fd);
 
         var statx_buf: linux.Statx = std.mem.zeroes(linux.Statx);
         const rc = linux.statx(

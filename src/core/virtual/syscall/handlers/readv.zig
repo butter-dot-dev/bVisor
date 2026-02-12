@@ -1,6 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
-const posix = std.posix;
+const iovec = std.posix.iovec;
 const types = @import("../../../types.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
@@ -57,12 +57,12 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     defer file.unref();
 
     // Read iovec array from child memory
-    var iovecs: [MAX_IOV]posix.iovec = undefined;
+    var iovecs: [MAX_IOV]iovec = undefined;
     var total_requested: usize = 0;
 
     for (0..iovec_count) |i| {
-        const iov_addr = iovec_ptr + i * @sizeOf(posix.iovec);
-        iovecs[i] = memory_bridge.read(posix.iovec, caller_tid, iov_addr) catch {
+        const iov_addr = iovec_ptr + i * @sizeOf(iovec);
+        iovecs[i] = memory_bridge.read(iovec, caller_tid, iov_addr) catch {
             return replyErr(notif.id, .FAULT);
         };
         total_requested += iovecs[i].len;
@@ -127,7 +127,7 @@ test "readv single iovec reads data correctly" {
 
     // Set up a single iovec
     var result_buf: [64]u8 = undefined;
-    var iovecs = [_]posix.iovec{
+    var iovecs = [_]iovec{
         .{ .base = &result_buf, .len = result_buf.len },
     };
 
@@ -161,7 +161,7 @@ test "readv multiple iovecs distributes data across buffers" {
     // Content is "100\n" (4 bytes), distribute across 2-byte buffers
     var buf1: [2]u8 = undefined;
     var buf2: [2]u8 = undefined;
-    var iovecs = [_]posix.iovec{
+    var iovecs = [_]iovec{
         .{ .base = &buf1, .len = 2 },
         .{ .base = &buf2, .len = 2 },
     };
@@ -191,7 +191,7 @@ test "readv FD 0 returns replyContinue" {
     defer supervisor.deinit();
 
     var buf: [64]u8 = undefined;
-    var iovecs = [_]posix.iovec{
+    var iovecs = [_]iovec{
         .{ .base = &buf, .len = buf.len },
     };
 
@@ -217,7 +217,7 @@ test "readv non-existent VFD returns EBADF" {
     defer supervisor.deinit();
 
     var buf: [64]u8 = undefined;
-    var iovecs = [_]posix.iovec{
+    var iovecs = [_]iovec{
         .{ .base = &buf, .len = buf.len },
     };
 

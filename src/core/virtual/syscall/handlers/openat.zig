@@ -1,6 +1,5 @@
 const std = @import("std");
 const linux = std.os.linux;
-const posix = std.posix;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
@@ -13,8 +12,6 @@ const resolveAndRoute = path_router.resolveAndRoute;
 const Supervisor = @import("../../../Supervisor.zig");
 const LogBuffer = @import("../../../LogBuffer.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
-const types = @import("../../../types.zig");
-const linuxToPosixFlags = types.linuxToPosixFlags;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
 const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 
@@ -91,10 +88,8 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
             return replyErr(notif.id, .PERM);
         },
         .handle => |h| {
-            // Convert linux.O to posix.O
-            const linux_flags: linux.O = @bitCast(@as(u32, @truncate(notif.data.arg2)));
-            const flags = linuxToPosixFlags(linux_flags);
-            const mode: posix.mode_t = @truncate(notif.data.arg3);
+            const flags: linux.O = @bitCast(@as(u32, @truncate(notif.data.arg2)));
+            const mode: linux.mode_t = @truncate(notif.data.arg3);
 
             // Special case: if we're in the /proc filepath
             // We need to sync guest_threads with the kernel to ensure all current PIDs are registered
@@ -155,7 +150,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
             };
 
             // Set the File's flags
-            file.open_flags = linux_flags;
+            file.open_flags = flags;
 
             // Store the opened path on the File (already normalized by resolveAndRoute)
             file.setOpenedPath(h.normalized) catch {

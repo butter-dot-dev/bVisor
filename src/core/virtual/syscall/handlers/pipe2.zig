@@ -30,15 +30,15 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
     // Wrap both ends as passthrough Files
     const read_file = File.init(allocator, .{ .passthrough = .{ .fd = kernel_fds[0] } }) catch {
-        _ = std.posix.system.close(kernel_fds[0]);
-        _ = std.posix.system.close(kernel_fds[1]);
+        _ = linux.close(kernel_fds[0]);
+        _ = linux.close(kernel_fds[1]);
         logger.log("pipe2: failed to alloc read File", .{});
         return replyErr(notif.id, .NOMEM);
     };
 
     const write_file = File.init(allocator, .{ .passthrough = .{ .fd = kernel_fds[1] } }) catch {
         read_file.unref(); // already closes kernel_fds[0] via Passthrough.close
-        _ = std.posix.system.close(kernel_fds[1]);
+        _ = linux.close(kernel_fds[1]);
         logger.log("pipe2: failed to alloc write File", .{});
         return replyErr(notif.id, .NOMEM);
     };

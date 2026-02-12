@@ -1,7 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const linux = std.os.linux;
-const posix = std.posix;
 const Io = std.Io;
 const types = @import("types.zig");
 const syscalls = @import("virtual/syscall/syscalls.zig");
@@ -62,7 +61,7 @@ pub fn init(allocator: Allocator, io: Io, uid: [16]u8, notify_fd: linux.fd_t, in
 
 pub fn deinit(self: *Self) void {
     if (self.notify_fd >= 0) {
-        posix.close(self.notify_fd);
+        _ = linux.close(self.notify_fd);
     }
     self.guest_threads.deinit();
     self.overlay.deinit();
@@ -133,7 +132,8 @@ fn recv(self: Self) !?linux.SECCOMP.notif {
         .events = linux.POLL.IN,
         .revents = 0,
     }};
-    _ = try posix.poll(&pfds, -1);
+    const poll_rc = linux.poll(&pfds, 1, -1);
+    if (linux.errno(poll_rc) != .SUCCESS) return error.SyscallFailed;
 
     if (pfds[0].revents & linux.POLL.IN == 0) {
         self.logger.log("Guest exited (POLLHUP), stopping notification handler", .{});
@@ -149,7 +149,7 @@ fn recv(self: Self) !?linux.SECCOMP.notif {
                 self.logger.log("Guest exited, stopping notification handler", .{});
                 return null;
             },
-            else => return posix.unexpectedErrno(err),
+            else => return error.Unexpected,
         },
     }
 }
@@ -163,7 +163,7 @@ fn send(self: Self, resp: linux.SECCOMP.notif_resp) !void {
                 // Task exited before we could respond - this is fine
                 self.logger.log("Task exited before response could be sent", .{});
             },
-            else => return posix.unexpectedErrno(err),
+            else => return error.Unexpected,
         },
     }
 }

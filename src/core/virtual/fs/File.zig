@@ -1,6 +1,5 @@
 const std = @import("std");
 const linux = std.os.linux;
-const posix = std.posix;
 
 const Thread = @import("../proc/Thread.zig");
 const OverlayRoot = @import("../OverlayRoot.zig");
@@ -94,7 +93,7 @@ fn close(self: *Self) void {
     }
 }
 
-pub fn backingFd(self: *Self) ?posix.fd_t {
+pub fn backingFd(self: *Self) ?linux.fd_t {
     return switch (self.backend) {
         .passthrough => |f| f.fd,
         .cow => |f| switch (f) {

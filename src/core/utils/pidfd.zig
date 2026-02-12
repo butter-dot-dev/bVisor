@@ -1,7 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const linux = std.os.linux;
-const posix = std.posix;
 const types = @import("../types.zig");
 const Result = types.LinuxResult;
 
@@ -36,7 +35,7 @@ pub inline fn lookupGuestFdWithRetry(child_pid: linux.pid_t, local_fd: linux.fd_
                     try io.sleep(std.Io.Duration.fromMilliseconds(1), .awake);
                     continue;
                 },
-                else => return posix.unexpectedErrno(err),
+                else => return error.Unexpected,
             },
         }
     }
