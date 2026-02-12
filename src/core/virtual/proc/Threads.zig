@@ -301,10 +301,6 @@ pub inline fn get_leader(self: *Self, thread: *Thread) !*Thread {
     return self.get(leader_tid);
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 test "state is correct after initial thread" {
     var v_threads = Self.init(std.testing.allocator);
     defer v_threads.deinit();

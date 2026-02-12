@@ -102,10 +102,6 @@ pub fn cowExists(self: *const Self, path: []const u8) bool {
     return true;
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 const testing = std.testing;
 
 test "init creates cow and tmp subdirectories" {

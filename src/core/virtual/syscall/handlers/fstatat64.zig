@@ -164,10 +164,6 @@ fn writeStatResponse(notif: linux.SECCOMP.notif, statx_buf: linux.Statx, statbuf
     return replySuccess(notif.id, 0);
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
 const isError = @import("../../../seccomp/notif.zig").isError;

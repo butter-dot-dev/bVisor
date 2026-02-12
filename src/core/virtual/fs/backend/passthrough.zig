@@ -18,6 +18,7 @@ fn sysOpenat(path: []const u8, flags: linux.O, mode: linux.mode_t) !linux.fd_t {
 }
 
 fn sysRead(fd: linux.fd_t, buf: []u8) !usize {
+    if (buf.len == 0) return 0;
     const rc = linux.read(fd, buf.ptr, buf.len);
     if (linux.errno(rc) != .SUCCESS) return error.SyscallFailed;
     return rc;

@@ -77,10 +77,6 @@ pub fn setCwd(self: *Self, new_cwd: []const u8) !void {
     self.cwd = copy;
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 const testing = std.testing;
 
 test "init creates FsInfo with cwd=/" {

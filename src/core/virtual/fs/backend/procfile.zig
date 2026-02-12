@@ -182,10 +182,6 @@ pub const ProcFile = struct {
     }
 };
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 const testing = std.testing;
 const Threads = @import("../../proc/Threads.zig");
 const proc_info = @import("../../../utils/proc_info.zig");
