@@ -3,13 +3,19 @@ const linux = std.os.linux;
 const posix = std.posix;
 const OverlayRoot = @import("../../OverlayRoot.zig");
 
+fn sysWrite(fd: linux.fd_t, data: []const u8) !usize {
+    const rc = linux.write(fd, data.ptr, data.len);
+    if (linux.errno(rc) != .SUCCESS) return error.SyscallFailed;
+    return rc;
+}
+
 /// Passthrough backend - directly wraps a kernel file descriptor.
 /// Used for safe device files like /dev/null, /dev/zero, /dev/urandom.
 pub const Passthrough = struct {
     fd: posix.fd_t,
 
     pub fn open(_: *OverlayRoot, path: []const u8, flags: posix.O, mode: posix.mode_t) !Passthrough {
-        const fd = try posix.open(path, flags, mode);
+        const fd = try posix.openat(linux.AT.FDCWD,path, flags, mode);
         return .{ .fd = fd };
     }
 
@@ -18,7 +24,7 @@ pub const Passthrough = struct {
     }
 
     pub fn write(self: *Passthrough, data: []const u8) !usize {
-        return posix.write(self.fd, data);
+        return sysWrite(self.fd, data);
     }
 
     // Use system.close instead of posix.close: posix.close panics on EBADF,
@@ -44,7 +50,7 @@ pub const Passthrough = struct {
         if (comptime builtin.os.tag != .linux) return error.StatxFail;
 
         // Open O_PATH (no permissions needed, works on any file type)
-        const fd = try posix.open(path, .{ .PATH = true }, 0);
+        const fd = try posix.openat(linux.AT.FDCWD,path, .{ .PATH = true }, 0);
         defer posix.close(fd);
 
         var statx_buf: linux.Statx = std.mem.zeroes(linux.Statx);

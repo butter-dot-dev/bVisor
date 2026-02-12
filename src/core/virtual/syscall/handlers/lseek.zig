@@ -69,7 +69,7 @@ test "lseek SEEK_SET repositions to given offset" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     // Insert a proc file (content "100\n" = 4 bytes)
@@ -102,7 +102,7 @@ test "lseek SEEK_END positions relative to content end" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     // Insert a proc file (content "100\n" = 4 bytes)
@@ -130,7 +130,7 @@ test "lseek SEEK_CUR advances from current position" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
@@ -161,7 +161,7 @@ test "lseek to negative offset returns EINVAL" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
@@ -188,7 +188,7 @@ test "lseek on stdin returns ESPIPE" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const notif = makeNotif(.lseek, .{
@@ -210,7 +210,7 @@ test "lseek on stdout returns ESPIPE" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const notif = makeNotif(.lseek, .{
@@ -232,7 +232,7 @@ test "lseek on non-existent VFD returns EBADF" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const notif = makeNotif(.lseek, .{
@@ -254,7 +254,7 @@ test "lseek with invalid whence returns EINVAL" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
@@ -280,7 +280,7 @@ test "lseek with unknown caller PID returns ESRCH" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const notif = makeNotif(.lseek, .{

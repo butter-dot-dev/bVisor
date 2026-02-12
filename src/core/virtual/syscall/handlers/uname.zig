@@ -52,7 +52,7 @@ test "uname returns virtualized system info" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     var uts: linux.utsname = undefined;

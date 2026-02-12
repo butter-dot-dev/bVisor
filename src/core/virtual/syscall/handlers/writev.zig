@@ -138,7 +138,7 @@ test "writev single iovec writes data" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
@@ -170,7 +170,7 @@ test "writev multiple iovecs concatenated write" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
@@ -207,7 +207,7 @@ test "writev FD 1 (stdout) captures into log buffer" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, io, generateUid(io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const data = "hello";
@@ -236,7 +236,7 @@ test "writev FD 2 (stderr) captures into log buffer" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, io, generateUid(io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const data = "error";
@@ -265,7 +265,7 @@ test "writev stdout: write, write, drain, write, drain" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, io, generateUid(io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     // writev "hel" + "lo "
@@ -328,7 +328,7 @@ test "writev non-existent VFD returns EBADF" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const data = "hello";

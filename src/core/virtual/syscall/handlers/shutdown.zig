@@ -59,7 +59,7 @@ test "shutdown unknown caller returns ESRCH" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const notif = makeNotif(.shutdown, .{
@@ -80,7 +80,7 @@ test "shutdown invalid vfd returns EBADF" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const notif = makeNotif(.shutdown, .{
@@ -101,7 +101,7 @@ test "shutdown on socketpair succeeds" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     // Create a socketpair

@@ -218,7 +218,7 @@ test "F_GETFD returns 0 for non-cloexec fd" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, 100, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, 100, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const init_tid: AbsTid = 100;
@@ -238,7 +238,7 @@ test "F_GETFD returns FD_CLOEXEC for cloexec fd" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, 100, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, 100, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const init_tid: AbsTid = 100;
@@ -260,7 +260,7 @@ test "F_SETFD sets cloexec" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, 100, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, 100, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const init_tid: AbsTid = 100;
@@ -288,7 +288,7 @@ test "F_GETFL returns stored open flags" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, 100, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, 100, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const flags: linux.O = .{ .ACCMODE = .RDWR, .APPEND = true };
@@ -312,7 +312,7 @@ test "F_SETFL changes mutable flags but preserves ACCMODE" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, 100, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, 100, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const flags: linux.O = .{ .ACCMODE = .RDONLY };
@@ -340,7 +340,7 @@ test "F_DUPFD duplicates fd" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, 100, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, 100, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const init_tid: AbsTid = 100;
@@ -363,7 +363,7 @@ test "F_DUPFD_CLOEXEC duplicates fd with cloexec" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, 100, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, 100, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const init_tid: AbsTid = 100;
@@ -387,7 +387,7 @@ test "fcntl on bad fd returns EBADF" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, 100, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, 100, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const resp = handle(makeFcntlNotif(100, 999, F.GETFD, 0), &supervisor);
@@ -401,7 +401,7 @@ test "fcntl on unknown caller returns ESRCH" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, 100, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, 100, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const resp = handle(makeFcntlNotif(999, 3, F.GETFD, 0), &supervisor);

@@ -13,7 +13,7 @@ uid: [16]u8,
 pub fn init(allocator: std.mem.Allocator) !*Self {
     const self = try allocator.create(Self);
     self.* = .{
-        .uid = core.generateUid(),
+        .uid = core.generateUid(napi.io),
     };
     return self;
 }
@@ -26,10 +26,7 @@ pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
 // Returns JS type (RunCmdResult)
 pub fn runCmd(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
     const self = napi.ZigExternal(Self).unwrap(env, info) catch return null;
-
-    var threaded: std.Io.Threaded = .init(napi.allocator, .{});
-    defer threaded.deinit();
-    const io = threaded.io();
+    const io = napi.io;
 
     // Allocate stdout and stderr buffers for this run, owned by node
     var stdout_stream: ?*Stream = Stream.init(napi.allocator, io) catch return null;

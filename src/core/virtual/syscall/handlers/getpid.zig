@@ -51,7 +51,7 @@ test "getpid returns init Thread's AbsTgid" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const notif = makeNotif(.getpid, .{ .pid = init_tid });
@@ -67,7 +67,7 @@ test "getpid for child Thread returns its AbsTgid" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_guest_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_guest_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     // Add a child to the initial guest

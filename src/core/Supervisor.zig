@@ -53,7 +53,7 @@ pub fn init(allocator: Allocator, io: Io, uid: [16]u8, notify_fd: linux.fd_t, in
         .stderr = stderr,
         .init_guest_tid = init_guest_tid,
         .notify_fd = notify_fd,
-        .start_time = try Io.Clock.awake.now(io),
+        .start_time = Io.Clock.awake.now(io),
         .logger = logger,
         .guest_threads = guest_threads,
         .overlay = overlay,
@@ -149,7 +149,7 @@ fn recv(self: Self) !?linux.SECCOMP.notif {
                 self.logger.log("Guest exited, stopping notification handler", .{});
                 return null;
             },
-            else => |_| return posix.unexpectedErrno(err),
+            else => return posix.unexpectedErrno(err),
         },
     }
 }

@@ -5,13 +5,19 @@ const OverlayRoot = @import("../../OverlayRoot.zig");
 
 const builtin = @import("builtin");
 
+fn sysWrite(fd: linux.fd_t, data: []const u8) !usize {
+    const rc = linux.write(fd, data.ptr, data.len);
+    if (linux.errno(rc) != .SUCCESS) return error.SyscallFailed;
+    return rc;
+}
+
 pub const Tmp = struct {
     fd: posix.fd_t,
 
     pub fn open(overlay: *OverlayRoot, path: []const u8, flags: posix.O, mode: posix.mode_t) !Tmp {
         var buf: [512]u8 = undefined;
         const resolved = try overlay.resolveTmp(path, &buf);
-        const fd = try posix.open(resolved, flags, mode);
+        const fd = try posix.openat(linux.AT.FDCWD,resolved, flags, mode);
         return .{ .fd = fd };
     }
 
@@ -20,7 +26,7 @@ pub const Tmp = struct {
     }
 
     pub fn write(self: *Tmp, data: []const u8) !usize {
-        return posix.write(self.fd, data);
+        return sysWrite(self.fd, data);
     }
 
     // Use system.close instead of posix.close: posix.close panics on EBADF,
@@ -49,7 +55,7 @@ pub const Tmp = struct {
         var resolve_buf: [512]u8 = undefined;
         const resolved = try overlay.resolveTmp(path, &resolve_buf);
 
-        const fd = try posix.open(resolved, .{ .PATH = true }, 0);
+        const fd = try posix.openat(linux.AT.FDCWD,resolved, .{ .PATH = true }, 0);
         defer posix.close(fd);
 
         var statx_buf: linux.Statx = std.mem.zeroes(linux.Statx);

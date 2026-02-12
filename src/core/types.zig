@@ -29,7 +29,7 @@ pub fn LinuxResult(comptime T: type) type {
         pub fn unwrap(self: Self) !T {
             return switch (self) {
                 .Ok => |value| value,
-                .Error => |_| error.SyscallFailed,
+                .Error => error.SyscallFailed,
             };
         }
     };

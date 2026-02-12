@@ -78,7 +78,7 @@ test "kill with negative pid returns EINVAL" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, 100, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, 100, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const notif = makeNotif(.kill, .{
@@ -98,7 +98,7 @@ test "kill with zero pid returns EINVAL" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, 100, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, 100, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     const notif = makeNotif(.kill, .{

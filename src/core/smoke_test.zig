@@ -381,7 +381,7 @@ fn test_brk() bool {
 }
 
 fn test_mmap_anon() bool {
-    const ptr = Result(usize).from(linux.mmap(null, 4096, linux.PROT.READ | linux.PROT.WRITE, .{ .TYPE = .PRIVATE, .ANONYMOUS = true }, -1, 0)).unwrap() catch return false;
+    const ptr = Result(usize).from(linux.mmap(null, 4096, linux.PROT{ .READ = true, .WRITE = true }, .{ .TYPE = .PRIVATE, .ANONYMOUS = true }, -1, 0)).unwrap() catch return false;
 
     const slice: [*]u8 = @ptrFromInt(ptr);
     slice[0] = 42;
@@ -391,15 +391,15 @@ fn test_mmap_anon() bool {
 }
 
 fn test_mprotect() bool {
-    const ptr = Result(usize).from(linux.mmap(null, 4096, linux.PROT.READ | linux.PROT.WRITE, .{ .TYPE = .PRIVATE, .ANONYMOUS = true }, -1, 0)).unwrap() catch return false;
+    const ptr = Result(usize).from(linux.mmap(null, 4096, linux.PROT{ .READ = true, .WRITE = true }, .{ .TYPE = .PRIVATE, .ANONYMOUS = true }, -1, 0)).unwrap() catch return false;
     defer _ = linux.munmap(@ptrFromInt(ptr), 4096);
 
-    Result(void).from(linux.mprotect(@ptrFromInt(ptr), 4096, linux.PROT.READ)).unwrap() catch return false;
+    Result(void).from(linux.mprotect(@ptrFromInt(ptr), 4096, linux.PROT{ .READ = true })).unwrap() catch return false;
     return true;
 }
 
 fn test_munmap() bool {
-    const ptr = Result(usize).from(linux.mmap(null, 4096, linux.PROT.READ | linux.PROT.WRITE, .{ .TYPE = .PRIVATE, .ANONYMOUS = true }, -1, 0)).unwrap() catch return false;
+    const ptr = Result(usize).from(linux.mmap(null, 4096, linux.PROT{ .READ = true, .WRITE = true }, .{ .TYPE = .PRIVATE, .ANONYMOUS = true }, -1, 0)).unwrap() catch return false;
 
     Result(void).from(linux.munmap(@ptrFromInt(ptr), 4096)).unwrap() catch return false;
     return true;
@@ -454,7 +454,7 @@ fn test_kill_child() bool {
     var rusage: linux.rusage = undefined;
     Result(void).from(linux.wait4(fork_result, &status, 0, &rusage)).unwrap() catch return false;
 
-    return linux.W.IFSIGNALED(status) and linux.W.TERMSIG(status) == @intFromEnum(linux.SIG.KILL);
+    return linux.W.IFSIGNALED(status) and linux.W.TERMSIG(status) == linux.SIG.KILL;
 }
 
 fn test_kill_unknown_esrch() bool {

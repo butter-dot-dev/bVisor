@@ -136,7 +136,7 @@ Not yet handled but likely necessary for Bash compatibility. Currently return `E
 ## Development Guide
 
 #### Zig
-bVisor is written in Zig. Zig is pre-1.0, so compilation is only guaranteed with the exact zig build. We're using a tagged commit on 0.16 dev, which includes major breaking changes (Io) compared to previous versions, so please use the exact version specified in the `build.zig.zon` file. It's also recommended to compile ZLS from source using a tagged commit compatible with Zig. You'll be flying blind otherwise.
+bVisor is written in Zig. Zig is pre-1.0, so compilation is only guaranteed with the exact zig build. We're using a tagged commit on 0.16 dev, which includes major breaking changes (Io) compared to previous versions, so please use the exact version specified in the `build.zig.zon` file. [anyzig](https://github.com/marler8997/anyzig) is the recommended tool for getting the correct version of Zig. It's also recommended to compile ZLS from source using a tagged commit compatible with Zig. You'll be flying blind otherwise.
 
 #### Cross-compilation
 bVisor depends on Linux kernel features, although it's developed primarily on ARM Macs. Zig cross-compiles to Linux, and all tests run in Docker.

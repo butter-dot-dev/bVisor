@@ -33,10 +33,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         defer supervisor.mutex.unlock(supervisor.io);
 
         info.procs = @intCast(@min(supervisor.guest_threads.lookup.count(), std.math.maxInt(u16)));
-        const now = Io.Clock.awake.now(supervisor.io) catch |err| {
-            logger.log("sysinfo: failed to get current timestamp: {}", .{err});
-            return replyErr(notif.id, .INVAL);
-        };
+        const now = Io.Clock.awake.now(supervisor.io);
         info.uptime = supervisor.start_time.durationTo(now).toSeconds();
     }
 
@@ -55,7 +52,7 @@ test "sysinfo returns virtualized system info" {
     var stderr_buf = LogBuffer.init(allocator);
     defer stdout_buf.deinit();
     defer stderr_buf.deinit();
-    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(), -1, init_tid, &stdout_buf, &stderr_buf);
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
     var info: linux.Sysinfo = undefined;

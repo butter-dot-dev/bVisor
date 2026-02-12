@@ -5,6 +5,17 @@ const std = @import("std");
 var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
 pub const allocator = gpa.allocator();
 
+// Global Io instance, initialized in napi_register_module_v1
+var threaded: std.Io.Threaded = undefined;
+pub var io: std.Io = undefined;
+var io_initialized: bool = false;
+
+pub fn initIo() void {
+    threaded = .init(allocator, .{ .environ = .empty });
+    io = threaded.io();
+    io_initialized = true;
+}
+
 // Helpful utils
 
 pub fn throw(env: c.napi_env, comptime msg: [:0]const u8) void {
