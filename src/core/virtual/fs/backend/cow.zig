@@ -107,6 +107,16 @@ pub const Cow = union(enum) {
         if (linux.errno(result) != .SUCCESS) return error.SyscallFailed;
         return @intCast(result);
     }
+
+    pub fn connect(self: *Cow, addr: [*]const u8, addrlen: linux.socklen_t) !void {
+        _ = .{ self, addr, addrlen };
+        return error.NotASocket;
+    }
+
+    pub fn shutdown(self: *Cow, how: i32) !void {
+        _ = .{ self, how };
+        return error.NotASocket;
+    }
 };
 
 /// Copy a file from src to dst using posix calls.

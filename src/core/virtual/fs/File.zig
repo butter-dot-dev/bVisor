@@ -170,3 +170,15 @@ pub fn lseek(self: *Self, offset: i64, whence: u32) !i64 {
         .proc => |*f| return f.lseek(offset, whence),
     }
 }
+
+pub fn connect(self: *Self, addr: [*]const u8, addrlen: linux.socklen_t) !void {
+    switch (self.backend) {
+        inline else => |*f| return f.connect(addr, addrlen),
+    }
+}
+
+pub fn shutdown(self: *Self, how: i32) !void {
+    switch (self.backend) {
+        inline else => |*f| return f.shutdown(how),
+    }
+}

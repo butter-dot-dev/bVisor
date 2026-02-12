@@ -170,6 +170,16 @@ pub const ProcFile = struct {
         self.offset = @intCast(new_offset);
         return new_offset;
     }
+
+    pub fn connect(self: *ProcFile, addr: [*]const u8, addrlen: linux.socklen_t) !void {
+        _ = .{ self, addr, addrlen };
+        return error.NotASocket;
+    }
+
+    pub fn shutdown(self: *ProcFile, how: i32) !void {
+        _ = .{ self, how };
+        return error.NotASocket;
+    }
 };
 
 // ============================================================================

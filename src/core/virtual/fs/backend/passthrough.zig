@@ -64,6 +64,16 @@ pub const Passthrough = struct {
         if (linux.errno(result) != .SUCCESS) return error.SyscallFailed;
         return @intCast(result);
     }
+
+    pub fn connect(self: *Passthrough, addr: [*]const u8, addrlen: linux.socklen_t) !void {
+        const rc = linux.connect(self.fd, @ptrCast(addr), addrlen);
+        if (linux.errno(rc) != .SUCCESS) return error.SyscallFailed;
+    }
+
+    pub fn shutdown(self: *Passthrough, how: i32) !void {
+        const rc = linux.shutdown(self.fd, how);
+        if (linux.errno(rc) != .SUCCESS) return error.SyscallFailed;
+    }
 };
 
 const testing = std.testing;

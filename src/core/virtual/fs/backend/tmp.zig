@@ -69,6 +69,16 @@ pub const Tmp = struct {
         if (linux.errno(result) != .SUCCESS) return error.SyscallFailed;
         return @intCast(result);
     }
+
+    pub fn connect(self: *Tmp, addr: [*]const u8, addrlen: linux.socklen_t) !void {
+        _ = .{ self, addr, addrlen };
+        return error.NotASocket;
+    }
+
+    pub fn shutdown(self: *Tmp, how: i32) !void {
+        _ = .{ self, how };
+        return error.NotASocket;
+    }
 };
 
 // ============================================================================

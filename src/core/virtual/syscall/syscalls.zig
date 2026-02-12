@@ -32,6 +32,8 @@ const faccessat = @import("handlers/faccessat.zig");
 const pipe2 = @import("handlers/pipe2.zig");
 const socket = @import("handlers/socket.zig");
 const socketpair = @import("handlers/socketpair.zig");
+const connect = @import("handlers/connect.zig");
+const shutdown = @import("handlers/shutdown.zig");
 
 pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
     const sys: linux.SYS = @enumFromInt(notif.data.nr);
@@ -58,6 +60,8 @@ pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.
         .pipe2 => pipe2.handle(notif, supervisor),
         .socket => socket.handle(notif, supervisor),
         .socketpair => socketpair.handle(notif, supervisor),
+        .connect => connect.handle(notif, supervisor),
+        .shutdown => shutdown.handle(notif, supervisor),
         // Implemented - process
         .getpid => getpid.handle(notif, supervisor),
         .getppid => getppid.handle(notif, supervisor),
@@ -127,6 +131,13 @@ pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.
         .set_robust_list,
         .rseq,
         => replyContinue(notif.id),
+
+        // Blocked - network server (outbound only, no binding/listening)
+        .bind,
+        .listen,
+        .accept,
+        .accept4,
+        => replyErr(notif.id, .PERM),
 
         // Blocked - escape/privilege (return ENOSYS to indicate unavailable)
         .ptrace,
