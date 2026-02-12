@@ -30,6 +30,7 @@ const chdir = @import("handlers/chdir.zig");
 const fchdir = @import("handlers/fchdir.zig");
 const faccessat = @import("handlers/faccessat.zig");
 const pipe2 = @import("handlers/pipe2.zig");
+const fcntl = @import("handlers/fcntl.zig");
 
 pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
     const sys: linux.SYS = @enumFromInt(notif.data.nr);
@@ -54,6 +55,7 @@ pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.
         .fchdir => fchdir.handle(notif, supervisor),
         .faccessat => faccessat.handle(notif, supervisor),
         .pipe2 => pipe2.handle(notif, supervisor),
+        .fcntl => fcntl.handle(notif, supervisor),
         // Implemented - process
         .getpid => getpid.handle(notif, supervisor),
         .getppid => getppid.handle(notif, supervisor),
@@ -70,7 +72,6 @@ pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.
         .waitid => replyContinue(notif.id),
 
         // To implement - files
-        .fcntl,
         .ioctl,
         .getdents64,
         // To implement - process
