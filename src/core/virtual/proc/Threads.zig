@@ -98,7 +98,7 @@ pub fn get(self: *Self, tid: AbsTid) !*Thread {
     if (self.lookup.get(tid)) |thread| return thread;
 
     // Still not found, give up
-    return error.ThreadNotRegistered;
+    return error.SRCH;
 }
 
 /// Get Thread from an NsTgid via a reference Thread's Namespace
@@ -121,7 +121,7 @@ pub fn getNamespaced(
     if (ref_thread.namespace.threads.get(nstgid)) |thread| return thread;
 
     // Still not found, give up
-    return error.ThreadNotRegistered;
+    return error.SRCH;
 }
 
 /// Recursive lazy registration of Thread-s if necessary

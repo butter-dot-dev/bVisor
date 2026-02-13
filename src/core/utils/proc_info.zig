@@ -3,8 +3,7 @@ const builtin = @import("builtin");
 const linux = std.os.linux;
 const Allocator = std.mem.Allocator;
 
-const types = @import("../types.zig");
-const LinuxResult = types.LinuxResult;
+const checkErr = @import("../linux_error.zig").checkErr;
 
 const Thread = @import("../virtual/proc/Thread.zig");
 // Thread IDs
@@ -102,15 +101,15 @@ pub fn readNsTids(tgid: AbsTgid, tid: AbsTid, nstid_buf: []NsTid) ![]NsTid {
     var path_buf: [64:0]u8 = undefined;
     const path = std.fmt.bufPrintZ(&path_buf, "/proc/{d}/task/{d}/status", .{ tgid, tid }) catch unreachable;
 
-    const fd = try LinuxResult(linux.fd_t).from(
-        linux.open(path.ptr, .{ .ACCMODE = .RDONLY }, 0),
-    ).unwrap();
+    const open_rc = linux.open(path.ptr, .{ .ACCMODE = .RDONLY }, 0);
+    try checkErr(open_rc, "proc_info.readNsTids.open", .{});
+    const fd: linux.fd_t = @intCast(open_rc);
     defer _ = linux.close(fd);
 
     var file_buf: [4096]u8 = undefined;
-    const n = try LinuxResult(usize).from(
-        linux.read(fd, &file_buf, file_buf.len),
-    ).unwrap();
+    const read_rc = linux.read(fd, &file_buf, file_buf.len);
+    try checkErr(read_rc, "proc_info.readNsTids.read", .{});
+    const n: usize = read_rc;
 
     var nstids: []NsTid = &.{};
 
@@ -166,15 +165,15 @@ pub fn getStatus(tid: AbsTid) !ThreadStatus {
     var path_buf: [32:0]u8 = undefined;
     const path = std.fmt.bufPrintZ(&path_buf, "/proc/{d}/status", .{tid}) catch unreachable;
 
-    const fd = try LinuxResult(linux.fd_t).from(
-        linux.open(path.ptr, .{ .ACCMODE = .RDONLY }, 0),
-    ).unwrap();
+    const open_rc = linux.open(path.ptr, .{ .ACCMODE = .RDONLY }, 0);
+    try checkErr(open_rc, "proc_info.getStatus.open", .{});
+    const fd: linux.fd_t = @intCast(open_rc);
     defer _ = linux.close(fd);
 
     var buf: [4096]u8 = undefined;
-    const n = try LinuxResult(usize).from(
-        linux.read(fd, &buf, buf.len),
-    ).unwrap();
+    const read_rc = linux.read(fd, &buf, buf.len);
+    try checkErr(read_rc, "proc_info.getStatus.read", .{});
+    const n: usize = read_rc;
 
     var status = ThreadStatus{
         .tid = tid,
@@ -334,13 +333,13 @@ fn getNsInode(tid: AbsTid, ns_type: []const u8) ?u64 {
     const path = std.fmt.bufPrintZ(&path_buf, "/proc/{d}/ns/{s}", .{ tid, ns_type }) catch return null;
 
     var stat_buf: linux.Statx = undefined;
-    LinuxResult(void).from(linux.statx(
+    checkErr(linux.statx(
         linux.AT.FDCWD,
         path.ptr,
         0,
         @bitCast(linux.STATX{ .INO = true }),
         &stat_buf,
-    )).unwrap() catch return null;
+    ), "proc_info.getNsInode", .{}) catch return null;
 
     return stat_buf.ino;
 }

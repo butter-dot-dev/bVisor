@@ -1,19 +1,16 @@
 const std = @import("std");
 const linux = std.os.linux;
-
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
 const Supervisor = @import("../../../Supervisor.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
 const statxToStat = File.statxToStat;
-
 const replyContinue = @import("../../../seccomp/notif.zig").replyContinue;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const replyErr = @import("../../../seccomp/notif.zig").replyErr;
-
 const memory_bridge = @import("../../../utils/memory_bridge.zig");
 
-pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
+pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOMP.notif_resp {
     const logger = supervisor.logger;
 
     // Parse args: fstat(fd, statbuf)
@@ -34,30 +31,22 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         defer supervisor.mutex.unlock(supervisor.io);
 
         // Get caller Thread
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            std.log.err("fstat: Thread not found with tid={d}: {}", .{ caller_tid, err });
-            return replyContinue(notif.id);
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
         std.debug.assert(caller.tid == caller_tid);
 
         file = caller.fd_table.get_ref(fd) orelse {
             logger.log("fstat: EBADF for fd={d}", .{fd});
-            return replyErr(notif.id, .BADF);
+            return LinuxErr.BADF;
         };
     }
     defer file.unref();
 
     // Get stat based on the backend type
-    const statx_buf = file.statx() catch |err| {
-        logger.log("fstat: Unable to produce stat for fd={d}: {}", .{ fd, err });
-        return replyErr(notif.id, .IO);
-    };
+    const statx_buf = try file.statx();
 
     // Convert from internal Statx to the struct stat ABI expected by fstat(2)
     const stat_buf = statxToStat(statx_buf);
     const stat_bytes = std.mem.asBytes(&stat_buf);
-    memory_bridge.writeSlice(stat_bytes, @intCast(notif.pid), statbuf_addr) catch {
-        return replyErr(notif.id, .FAULT);
-    };
+    try memory_bridge.writeSlice(stat_bytes, @intCast(notif.pid), statbuf_addr);
     return replySuccess(notif.id, 0);
 }

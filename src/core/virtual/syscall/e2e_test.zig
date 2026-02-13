@@ -5,6 +5,7 @@ const iovec_const = std.posix.iovec_const;
 const testing = std.testing;
 
 const Supervisor = @import("../../Supervisor.zig");
+const LinuxErr = @import("../../linux_error.zig").LinuxErr;
 const LogBuffer = @import("../../LogBuffer.zig");
 const generateUid = @import("../../setup.zig").generateUid;
 const Thread = @import("../proc/Thread.zig");
@@ -17,7 +18,6 @@ const ProcFile = @import("../fs/backend/procfile.zig").ProcFile;
 const Tmp = @import("../fs/backend/tmp.zig").Tmp;
 
 const makeNotif = @import("../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../seccomp/notif.zig").isError;
 const isContinue = @import("../../seccomp/notif.zig").isContinue;
 
 const openat_handler = @import("handlers/openat.zig").handle;
@@ -94,29 +94,26 @@ test "open proc -> read -> close returns NsTid" {
     defer supervisor.deinit();
 
     // Open /proc/self
-    const open_resp = openat_handler(
+    const open_resp = try openat_handler(
         makeOpenatNotif(init_tid, "/proc/self", 0, 0),
         &supervisor,
     );
-    try testing.expect(!isError(open_resp));
     const vfd: i32 = @intCast(open_resp.val);
     try testing.expect(vfd >= 3);
 
     // Read
     var buf: [64]u8 = undefined;
-    const read_resp = read_handler(
+    const read_resp = try read_handler(
         makeReadNotif(init_tid, vfd, &buf, buf.len),
         &supervisor,
     );
-    try testing.expect(!isError(read_resp));
     try testing.expectEqualStrings("100\n", buf[0..@intCast(read_resp.val)]);
 
     // Close
-    const close_resp = close_handler(
+    _ = try close_handler(
         makeCloseNotif(init_tid, vfd),
         &supervisor,
     );
-    try testing.expect(!isError(close_resp));
 }
 
 test "open tmp -> write -> close -> reopen -> read -> close" {
@@ -131,52 +128,46 @@ test "open tmp -> write -> close -> reopen -> read -> close" {
 
     // Open /tmp/e2e_test.txt with CREAT|WRONLY|TRUNC
     const creat_flags: u32 = @bitCast(linux.O{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true });
-    const open_resp1 = openat_handler(
+    const open_resp1 = try openat_handler(
         makeOpenatNotif(init_tid, "/tmp/e2e_test.txt", creat_flags, 0o644),
         &supervisor,
     );
-    try testing.expect(!isError(open_resp1));
     const write_vfd: i32 = @intCast(open_resp1.val);
 
     // Write data
     var write_data = "hello e2e".*;
-    const write_resp = write_handler(
+    const write_resp = try write_handler(
         makeWriteNotif(init_tid, write_vfd, &write_data, write_data.len),
         &supervisor,
     );
-    try testing.expect(!isError(write_resp));
     try testing.expectEqual(@as(i64, 9), write_resp.val);
 
     // Close
-    const close_resp1 = close_handler(
+    _ = try close_handler(
         makeCloseNotif(init_tid, write_vfd),
         &supervisor,
     );
-    try testing.expect(!isError(close_resp1));
 
     // Reopen RDONLY
-    const open_resp2 = openat_handler(
+    const open_resp2 = try openat_handler(
         makeOpenatNotif(init_tid, "/tmp/e2e_test.txt", 0, 0),
         &supervisor,
     );
-    try testing.expect(!isError(open_resp2));
     const read_vfd: i32 = @intCast(open_resp2.val);
 
     // Read back
     var buf: [64]u8 = undefined;
-    const read_resp = read_handler(
+    const read_resp = try read_handler(
         makeReadNotif(init_tid, read_vfd, &buf, buf.len),
         &supervisor,
     );
-    try testing.expect(!isError(read_resp));
     try testing.expectEqualStrings("hello e2e", buf[0..@intCast(read_resp.val)]);
 
     // Close
-    const close_resp2 = close_handler(
+    _ = try close_handler(
         makeCloseNotif(init_tid, read_vfd),
         &supervisor,
     );
-    try testing.expect(!isError(close_resp2));
 }
 
 test "three files open simultaneously, each returns correct data" {
@@ -190,28 +181,25 @@ test "three files open simultaneously, each returns correct data" {
     defer supervisor.deinit();
 
     // Open a proc file
-    const proc_resp = openat_handler(
+    const proc_resp = try openat_handler(
         makeOpenatNotif(init_tid, "/proc/self", 0, 0),
         &supervisor,
     );
-    try testing.expect(!isError(proc_resp));
     const proc_vfd: i32 = @intCast(proc_resp.val);
 
     // Open /dev/null
-    const devnull_resp = openat_handler(
+    const devnull_resp = try openat_handler(
         makeOpenatNotif(init_tid, "/dev/null", 0, 0),
         &supervisor,
     );
-    try testing.expect(!isError(devnull_resp));
     const devnull_vfd: i32 = @intCast(devnull_resp.val);
 
     // Open a tmp file
     const creat_flags: u32 = @bitCast(linux.O{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true });
-    const tmp_resp = openat_handler(
+    const tmp_resp = try openat_handler(
         makeOpenatNotif(init_tid, "/tmp/e2e_multi.txt", creat_flags, 0o644),
         &supervisor,
     );
-    try testing.expect(!isError(tmp_resp));
     const tmp_vfd: i32 = @intCast(tmp_resp.val);
 
     // All VFDs should be different
@@ -221,25 +209,23 @@ test "three files open simultaneously, each returns correct data" {
 
     // Read from proc file
     var buf: [64]u8 = undefined;
-    const proc_read = read_handler(
+    const proc_read = try read_handler(
         makeReadNotif(init_tid, proc_vfd, &buf, buf.len),
         &supervisor,
     );
-    try testing.expect(!isError(proc_read));
     try testing.expectEqualStrings("100\n", buf[0..@intCast(proc_read.val)]);
 
     // Read from /dev/null - should return 0 (EOF)
-    const devnull_read = read_handler(
+    const devnull_read = try read_handler(
         makeReadNotif(init_tid, devnull_vfd, &buf, buf.len),
         &supervisor,
     );
-    try testing.expect(!isError(devnull_read));
     try testing.expectEqual(@as(i64, 0), devnull_read.val);
 
     // Close all
-    _ = close_handler(makeCloseNotif(init_tid, proc_vfd), &supervisor);
-    _ = close_handler(makeCloseNotif(init_tid, devnull_vfd), &supervisor);
-    _ = close_handler(makeCloseNotif(init_tid, tmp_vfd), &supervisor);
+    _ = try close_handler(makeCloseNotif(init_tid, proc_vfd), &supervisor);
+    _ = try close_handler(makeCloseNotif(init_tid, devnull_vfd), &supervisor);
+    _ = try close_handler(makeCloseNotif(init_tid, tmp_vfd), &supervisor);
 }
 
 test "close one of three, other two remain accessible, closed one EBADF" {
@@ -253,51 +239,46 @@ test "close one of three, other two remain accessible, closed one EBADF" {
     defer supervisor.deinit();
 
     // Open three files
-    const vfd1: i32 = @intCast(openat_handler(
+    const vfd1: i32 = @intCast((try openat_handler(
         makeOpenatNotif(init_tid, "/proc/self", 0, 0),
         &supervisor,
-    ).val);
-    const vfd2: i32 = @intCast(openat_handler(
+    )).val);
+    const vfd2: i32 = @intCast((try openat_handler(
         makeOpenatNotif(init_tid, "/dev/null", 0, 0),
         &supervisor,
-    ).val);
-    const vfd3: i32 = @intCast(openat_handler(
+    )).val);
+    const vfd3: i32 = @intCast((try openat_handler(
         makeOpenatNotif(init_tid, "/dev/zero", 0, 0),
         &supervisor,
-    ).val);
+    )).val);
 
     // Close the middle one
-    const close_resp = close_handler(
+    _ = try close_handler(
         makeCloseNotif(init_tid, vfd2),
         &supervisor,
     );
-    try testing.expect(!isError(close_resp));
 
     // vfd1 and vfd3 should still be readable
     var buf: [64]u8 = undefined;
-    const read1 = read_handler(
+    _ = try read_handler(
         makeReadNotif(init_tid, vfd1, &buf, buf.len),
         &supervisor,
     );
-    try testing.expect(!isError(read1));
 
-    const read3 = read_handler(
+    _ = try read_handler(
         makeReadNotif(init_tid, vfd3, &buf, buf.len),
         &supervisor,
     );
-    try testing.expect(!isError(read3));
 
     // vfd2 should EBADF
-    const read2 = read_handler(
+    try testing.expectError(error.BADF, read_handler(
         makeReadNotif(init_tid, vfd2, &buf, buf.len),
         &supervisor,
-    );
-    try testing.expect(isError(read2));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), read2.@"error");
+    ));
 
     // Cleanup
-    _ = close_handler(makeCloseNotif(init_tid, vfd1), &supervisor);
-    _ = close_handler(makeCloseNotif(init_tid, vfd3), &supervisor);
+    _ = try close_handler(makeCloseNotif(init_tid, vfd1), &supervisor);
+    _ = try close_handler(makeCloseNotif(init_tid, vfd3), &supervisor);
 }
 
 test "open -> close -> open -> second open gets next VFD (no reuse)" {
@@ -311,17 +292,17 @@ test "open -> close -> open -> second open gets next VFD (no reuse)" {
     defer supervisor.deinit();
 
     // Open first file
-    const resp1 = openat_handler(
+    const resp1 = try openat_handler(
         makeOpenatNotif(init_tid, "/dev/null", 0, 0),
         &supervisor,
     );
     const vfd1: i32 = @intCast(resp1.val);
 
     // Close it
-    _ = close_handler(makeCloseNotif(init_tid, vfd1), &supervisor);
+    _ = try close_handler(makeCloseNotif(init_tid, vfd1), &supervisor);
 
     // Open another file
-    const resp2 = openat_handler(
+    const resp2 = try openat_handler(
         makeOpenatNotif(init_tid, "/dev/null", 0, 0),
         &supervisor,
     );
@@ -342,11 +323,10 @@ test "CLONE_FILES fork - child sees parents FDs, parent sees childs" {
     defer supervisor.deinit();
 
     // Parent opens a file
-    const parent_open = openat_handler(
+    const parent_open = try openat_handler(
         makeOpenatNotif(init_tid, "/proc/self", 0, 0),
         &supervisor,
     );
-    try testing.expect(!isError(parent_open));
     const parent_vfd: i32 = @intCast(parent_open.val);
 
     // Fork with CLONE_FILES
@@ -360,19 +340,18 @@ test "CLONE_FILES fork - child sees parents FDs, parent sees childs" {
     try testing.expect(child_ref != null);
 
     // Child opens a new file - parent should see it too (shared table)
-    const child_open = openat_handler(
+    const child_open = try openat_handler(
         makeOpenatNotif(200, "/dev/null", 0, 0),
         &supervisor,
     );
-    try testing.expect(!isError(child_open));
     const child_vfd: i32 = @intCast(child_open.val);
     const parent_ref = parent.fd_table.get_ref(child_vfd);
     defer if (parent_ref) |f| f.unref();
     try testing.expect(parent_ref != null);
 
     // Cleanup
-    _ = close_handler(makeCloseNotif(init_tid, parent_vfd), &supervisor);
-    _ = close_handler(makeCloseNotif(200, child_vfd), &supervisor);
+    _ = try close_handler(makeCloseNotif(init_tid, parent_vfd), &supervisor);
+    _ = try close_handler(makeCloseNotif(200, child_vfd), &supervisor);
 }
 
 test "non-CLONE_FILES fork - independent tables, parent close doesnt affect child" {
@@ -386,11 +365,10 @@ test "non-CLONE_FILES fork - independent tables, parent close doesnt affect chil
     defer supervisor.deinit();
 
     // Parent opens a file
-    const parent_open = openat_handler(
+    const parent_open = try openat_handler(
         makeOpenatNotif(init_tid, "/proc/self", 0, 0),
         &supervisor,
     );
-    try testing.expect(!isError(parent_open));
     const parent_vfd: i32 = @intCast(parent_open.val);
 
     // Fork without CLONE_FILES (independent copy)
@@ -404,7 +382,7 @@ test "non-CLONE_FILES fork - independent tables, parent close doesnt affect chil
     try testing.expect(child_ref1 != null);
 
     // Parent closes - should not affect child
-    _ = close_handler(makeCloseNotif(init_tid, parent_vfd), &supervisor);
+    _ = try close_handler(makeCloseNotif(init_tid, parent_vfd), &supervisor);
     const parent_ref = parent.fd_table.get_ref(parent_vfd);
     defer if (parent_ref) |f| f.unref();
     try testing.expect(parent_ref == null);
@@ -431,23 +409,22 @@ test "child namespace reads /proc/self -> sees NsTid 1" {
     _ = try supervisor.guest_threads.registerChild(parent, 200, CloneFlags.from(linux.CLONE.NEWPID));
 
     // Child opens /proc/self
-    const open_resp = openat_handler(
+    const open_resp = try openat_handler(
         makeOpenatNotif(200, "/proc/self", 0, 0),
         &supervisor,
     );
-    try testing.expect(!isError(open_resp));
+
     const vfd: i32 = @intCast(open_resp.val);
 
     // Read should show NsTid 1 (child's view)
     var buf: [64]u8 = undefined;
-    const read_resp = read_handler(
+    const read_resp = try read_handler(
         makeReadNotif(200, vfd, &buf, buf.len),
         &supervisor,
     );
-    try testing.expect(!isError(read_resp));
     try testing.expectEqualStrings("1\n", buf[0..@intCast(read_resp.val)]);
 
-    _ = close_handler(makeCloseNotif(200, vfd), &supervisor);
+    _ = try close_handler(makeCloseNotif(200, vfd), &supervisor);
 }
 
 test "openat /tmp/../sys/class/net normalizes to blocked EPERM" {
@@ -460,12 +437,10 @@ test "openat /tmp/../sys/class/net normalizes to blocked EPERM" {
     var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
-    const resp = openat_handler(
+    try testing.expectError(error.PERM, openat_handler(
         makeOpenatNotif(init_tid, "/tmp/../sys/class/net", 0, 0),
         &supervisor,
-    );
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.PERM))), resp.@"error");
+    ));
 }
 
 test "unknown VFD returns EBADF across all handlers" {
@@ -480,35 +455,31 @@ test "unknown VFD returns EBADF across all handlers" {
 
     const bad_vfd: i32 = 99;
     var buf: [64]u8 = undefined;
-    const ebadf = -@as(i32, @intCast(@intFromEnum(linux.E.BADF)));
 
     // read
-    const read_resp = read_handler(
+    try testing.expectError(error.BADF, read_handler(
         makeReadNotif(init_tid, bad_vfd, &buf, buf.len),
         &supervisor,
-    );
-    try testing.expectEqual(ebadf, read_resp.@"error");
+    ));
 
     // write
     var wdata = "test".*;
-    const write_resp = write_handler(
+    try testing.expectError(error.BADF, write_handler(
         makeWriteNotif(init_tid, bad_vfd, &wdata, wdata.len),
         &supervisor,
-    );
-    try testing.expectEqual(ebadf, write_resp.@"error");
+    ));
 
     // close
-    const close_resp = close_handler(
+    try testing.expectError(error.BADF, close_handler(
         makeCloseNotif(init_tid, bad_vfd),
         &supervisor,
-    );
-    try testing.expectEqual(ebadf, close_resp.@"error");
+    ));
 
     // readv
     var iovecs_r = [_]iovec{
         .{ .base = &buf, .len = buf.len },
     };
-    const readv_resp = readv_handler(
+    try testing.expectError(error.BADF, readv_handler(
         makeNotif(.readv, .{
             .pid = init_tid,
             .arg0 = @as(u64, @bitCast(@as(i64, bad_vfd))),
@@ -516,15 +487,14 @@ test "unknown VFD returns EBADF across all handlers" {
             .arg2 = 1,
         }),
         &supervisor,
-    );
-    try testing.expectEqual(ebadf, readv_resp.@"error");
+    ));
 
     // writev
     const wv_data = "test";
     var iovecs_w = [_]iovec_const{
         .{ .base = wv_data.ptr, .len = wv_data.len },
     };
-    const writev_resp = writev_handler(
+    try testing.expectError(error.BADF, writev_handler(
         makeNotif(.writev, .{
             .pid = init_tid,
             .arg0 = @as(u64, @bitCast(@as(i64, bad_vfd))),
@@ -532,8 +502,7 @@ test "unknown VFD returns EBADF across all handlers" {
             .arg2 = 1,
         }),
         &supervisor,
-    );
-    try testing.expectEqual(ebadf, writev_resp.@"error");
+    ));
 }
 
 test "unknown PID returns ESRCH across all handlers" {
@@ -547,37 +516,32 @@ test "unknown PID returns ESRCH across all handlers" {
     defer supervisor.deinit();
 
     const bad_tid: AbsTid = 999;
-    const esrch = -@as(i32, @intCast(@intFromEnum(linux.E.SRCH)));
     var buf: [64]u8 = undefined;
 
     // openat
-    const openat_resp = openat_handler(
+    try testing.expectError(error.SRCH, openat_handler(
         makeOpenatNotif(bad_tid, "/dev/null", 0, 0),
         &supervisor,
-    );
-    try testing.expectEqual(esrch, openat_resp.@"error");
+    ));
 
     // read (non-stdin fd)
-    const read_resp = read_handler(
+    try testing.expectError(error.SRCH, read_handler(
         makeReadNotif(bad_tid, 3, &buf, buf.len),
         &supervisor,
-    );
-    try testing.expectEqual(esrch, read_resp.@"error");
+    ));
 
     // write (non-stdout/stderr fd)
     var wdata = "test".*;
-    const write_resp = write_handler(
+    try testing.expectError(error.SRCH, write_handler(
         makeWriteNotif(bad_tid, 3, &wdata, wdata.len),
         &supervisor,
-    );
-    try testing.expectEqual(esrch, write_resp.@"error");
+    ));
 
     // close (non-stdio fd)
-    const close_resp = close_handler(
+    try testing.expectError(error.SRCH, close_handler(
         makeCloseNotif(bad_tid, 3),
         &supervisor,
-    );
-    try testing.expectEqual(esrch, close_resp.@"error");
+    ));
 }
 
 test "fstat on proc file writes correct struct stat" {
@@ -591,20 +555,18 @@ test "fstat on proc file writes correct struct stat" {
     defer supervisor.deinit();
 
     // Open /proc/self
-    const open_resp = openat_handler(
+    const open_resp = try openat_handler(
         makeOpenatNotif(init_tid, "/proc/self", 0, 0),
         &supervisor,
     );
-    try testing.expect(!isError(open_resp));
     const vfd: i32 = @intCast(open_resp.val);
 
     // fstat
     var stat_buf: Stat = std.mem.zeroes(Stat);
-    const fstat_resp = fstat_handler(
+    const fstat_resp = try fstat_handler(
         makeFstatNotif(init_tid, vfd, &stat_buf),
         &supervisor,
     );
-    try testing.expect(!isError(fstat_resp));
     try testing.expectEqual(@as(i64, 0), fstat_resp.val);
 
     // ProcFile.statx sets: mode = S.IFREG | 0o444, nlink = 1, blksize = 4096, size = content_len
@@ -614,7 +576,7 @@ test "fstat on proc file writes correct struct stat" {
     try testing.expectEqual(@as(@TypeOf(stat_buf.st_blksize), 4096), stat_buf.st_blksize);
     try testing.expectEqual(@as(i64, 4), stat_buf.st_size);
 
-    _ = close_handler(makeCloseNotif(init_tid, vfd), &supervisor);
+    _ = try close_handler(makeCloseNotif(init_tid, vfd), &supervisor);
 }
 
 test "fstat on stdio fd returns continue" {
@@ -630,15 +592,15 @@ test "fstat on stdio fd returns continue" {
     var stat_buf: Stat = std.mem.zeroes(Stat);
 
     // stdin
-    const resp0 = fstat_handler(makeFstatNotif(init_tid, 0, &stat_buf), &supervisor);
+    const resp0 = try fstat_handler(makeFstatNotif(init_tid, 0, &stat_buf), &supervisor);
     try testing.expect(isContinue(resp0));
 
     // stdout
-    const resp1 = fstat_handler(makeFstatNotif(init_tid, 1, &stat_buf), &supervisor);
+    const resp1 = try fstat_handler(makeFstatNotif(init_tid, 1, &stat_buf), &supervisor);
     try testing.expect(isContinue(resp1));
 
     // stderr
-    const resp2 = fstat_handler(makeFstatNotif(init_tid, 2, &stat_buf), &supervisor);
+    const resp2 = try fstat_handler(makeFstatNotif(init_tid, 2, &stat_buf), &supervisor);
     try testing.expect(isContinue(resp2));
 }
 
@@ -653,9 +615,7 @@ test "fstat on unknown VFD returns EBADF" {
     defer supervisor.deinit();
 
     var stat_buf: Stat = std.mem.zeroes(Stat);
-    const resp = fstat_handler(makeFstatNotif(init_tid, 99, &stat_buf), &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
+    try testing.expectError(error.BADF, fstat_handler(makeFstatNotif(init_tid, 99, &stat_buf), &supervisor));
 }
 
 fn makeSocketpairNotif(tid: AbsTid, domain: u32, sock_type: u32, protocol: u32, sv_ptr: u64) linux.SECCOMP.notif {

@@ -1,13 +1,13 @@
 const std = @import("std");
 const linux = std.os.linux;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
 const Supervisor = @import("../../../Supervisor.zig");
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 
-pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
+pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOMP.notif_resp {
     const logger = supervisor.logger;
 
     // Parse args: lseek(fd, offset, whence)
@@ -18,7 +18,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
     // stdin/stdout/stderr are not seekable
     if (fd == linux.STDIN_FILENO or fd == linux.STDOUT_FILENO or fd == linux.STDERR_FILENO) {
-        return replyErr(notif.id, .SPIPE);
+        return LinuxErr.SPIPE;
     }
 
     // Critical section: File lookup
@@ -28,23 +28,17 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         defer supervisor.mutex.unlock(supervisor.io);
 
         // Get caller Thread
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            logger.log("lseek: Thread not found for tid={d}: {}", .{ caller_tid, err });
-            return replyErr(notif.id, .SRCH);
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
         std.debug.assert(caller.tid == caller_tid);
 
         file = caller.fd_table.get_ref(fd) orelse {
             logger.log("lseek: EBADF for fd={d}", .{fd});
-            return replyErr(notif.id, .BADF);
+            return LinuxErr.BADF;
         };
     }
     defer file.unref();
 
-    const new_offset = file.lseek(offset, whence) catch |err| {
-        logger.log("lseek: error for fd={d}: {s}", .{ fd, @errorName(err) });
-        return replyErr(notif.id, .INVAL);
-    };
+    const new_offset = try file.lseek(offset, whence);
 
     logger.log("lseek: fd={d} new_offset={d}", .{ fd, new_offset });
     return replySuccess(notif.id, new_offset);
@@ -52,7 +46,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const Threads = @import("../../proc/Threads.zig");
 const ProcFile = @import("../../fs/backend/procfile.zig").ProcFile;
 const LogBuffer = @import("../../../LogBuffer.zig");
@@ -86,8 +79,7 @@ test "lseek SEEK_SET repositions to given offset" {
         .arg2 = linux.SEEK.SET,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 }
 
@@ -114,8 +106,7 @@ test "lseek SEEK_END positions relative to content end" {
         .arg2 = linux.SEEK.END,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 4), resp.val); // 4 bytes
 }
 
@@ -145,8 +136,7 @@ test "lseek SEEK_CUR advances from current position" {
         .arg2 = linux.SEEK.CUR,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 3), resp.val); // 1 + 2 = 3
 }
 
@@ -172,9 +162,7 @@ test "lseek to negative offset returns EINVAL" {
         .arg2 = linux.SEEK.SET,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.INVAL))), resp.@"error");
+    try testing.expectError(error.INVAL, handle(notif, &supervisor));
 }
 
 test "lseek on stdin returns ESPIPE" {
@@ -194,9 +182,7 @@ test "lseek on stdin returns ESPIPE" {
         .arg2 = linux.SEEK.SET,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SPIPE))), resp.@"error");
+    try testing.expectError(error.SPIPE, handle(notif, &supervisor));
 }
 
 test "lseek on stdout returns ESPIPE" {
@@ -216,9 +202,7 @@ test "lseek on stdout returns ESPIPE" {
         .arg2 = linux.SEEK.SET,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SPIPE))), resp.@"error");
+    try testing.expectError(error.SPIPE, handle(notif, &supervisor));
 }
 
 test "lseek on non-existent VFD returns EBADF" {
@@ -238,9 +222,7 @@ test "lseek on non-existent VFD returns EBADF" {
         .arg2 = linux.SEEK.SET,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
+    try testing.expectError(error.BADF, handle(notif, &supervisor));
 }
 
 test "lseek with invalid whence returns EINVAL" {
@@ -264,9 +246,7 @@ test "lseek with invalid whence returns EINVAL" {
         .arg2 = 99, // invalid whence
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.INVAL))), resp.@"error");
+    try testing.expectError(error.INVAL, handle(notif, &supervisor));
 }
 
 test "lseek with unknown caller PID returns ESRCH" {
@@ -286,7 +266,5 @@ test "lseek with unknown caller PID returns ESRCH" {
         .arg2 = linux.SEEK.SET,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+    try testing.expectError(error.SRCH, handle(notif, &supervisor));
 }

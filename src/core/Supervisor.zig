@@ -2,9 +2,10 @@ const std = @import("std");
 const builtin = @import("builtin");
 const linux = std.os.linux;
 const Io = std.Io;
+const toLinuxE = @import("linux_error.zig").toLinuxE;
+const replyErr = @import("seccomp/notif.zig").replyErr;
 const types = @import("types.zig");
 const syscalls = @import("virtual/syscall/syscalls.zig");
-const Result = types.LinuxResult;
 const Logger = types.Logger;
 const Threads = @import("virtual/proc/Threads.zig");
 const OverlayRoot = @import("virtual/OverlayRoot.zig");
@@ -117,8 +118,9 @@ fn selectFirstDone(io: Io, futures: []Io.Future(HandlerReturn), count: usize) !u
 }
 
 fn handleNotif(self: *Self, notif: linux.SECCOMP.notif) !void {
-    const resp = syscalls.handle(notif, self);
-    try self.send(resp);
+    const notif_response = syscalls.handle(notif, self) catch |err|
+        replyErr(notif.id, toLinuxE(err));
+    try self.send(notif_response);
 }
 
 fn recv(self: Self) !?linux.SECCOMP.notif {
@@ -142,28 +144,26 @@ fn recv(self: Self) !?linux.SECCOMP.notif {
 
     var notif: linux.SECCOMP.notif = std.mem.zeroes(linux.SECCOMP.notif);
     const recv_result = linux.ioctl(self.notify_fd, linux.SECCOMP.IOCTL_NOTIF.RECV, @intFromPtr(&notif));
-    switch (Result(usize).from(recv_result)) {
-        .Ok => return notif,
-        .Error => |err| switch (err) {
-            .NOENT => {
-                self.logger.log("Guest exited, stopping notification handler", .{});
-                return null;
-            },
-            else => return error.Unexpected,
+    const err = linux.errno(recv_result);
+    if (err == .SUCCESS) return notif;
+    switch (err) {
+        .NOENT => {
+            self.logger.log("Guest exited, stopping notification handler", .{});
+            return null;
         },
+        else => return error.Unexpected,
     }
 }
 
 fn send(self: Self, resp: linux.SECCOMP.notif_resp) !void {
     const send_result = linux.ioctl(self.notify_fd, linux.SECCOMP.IOCTL_NOTIF.SEND, @intFromPtr(&resp));
-    switch (Result(usize).from(send_result)) {
-        .Ok => {},
-        .Error => |err| switch (err) {
-            .NOENT => {
-                // Task exited before we could respond - this is fine
-                self.logger.log("Task exited before response could be sent", .{});
-            },
-            else => return error.Unexpected,
+    const err = linux.errno(send_result);
+    if (err == .SUCCESS) return;
+    switch (err) {
+        .NOENT => {
+            // Task exited before we could respond - this is fine
+            self.logger.log("Task exited before response could be sent", .{});
         },
+        else => return error.Unexpected,
     }
 }

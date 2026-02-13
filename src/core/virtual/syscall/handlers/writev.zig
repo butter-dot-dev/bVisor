@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
 const iovec_const = std.posix.iovec_const;
-const types = @import("../../../types.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
@@ -9,13 +9,11 @@ const Supervisor = @import("../../../Supervisor.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 const replyContinue = @import("../../../seccomp/notif.zig").replyContinue;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const replyErr = @import("../../../seccomp/notif.zig").replyErr;
-
 const memory_bridge = @import("../../../utils/memory_bridge.zig");
 
 const MAX_IOV = 16;
 
-pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
+pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOMP.notif_resp {
     const logger = supervisor.logger;
 
     // Parse args
@@ -32,9 +30,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
         for (0..iovec_count) |i| {
             const iov_addr = iovec_ptr + i * @sizeOf(iovec_const);
-            stdio_iovecs[i] = memory_bridge.read(iovec_const, caller_tid, iov_addr) catch {
-                return replyErr(notif.id, .FAULT);
-            };
+            stdio_iovecs[i] = try memory_bridge.read(iovec_const, caller_tid, iov_addr);
         }
 
         for (0..iovec_count) |i| {
@@ -42,21 +38,15 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
             const buf_ptr = @intFromPtr(iov.base);
             const buf_len = @min(iov.len, stdio_buf.len - stdio_len);
             if (buf_len > 0) {
-                memory_bridge.readSlice(stdio_buf[stdio_len..][0..buf_len], caller_tid, buf_ptr) catch {
-                    return replyErr(notif.id, .FAULT);
-                };
+                try memory_bridge.readSlice(stdio_buf[stdio_len..][0..buf_len], caller_tid, buf_ptr);
                 stdio_len += buf_len;
             }
         }
 
         if (fd == linux.STDOUT_FILENO) {
-            supervisor.stdout.write(supervisor.io, stdio_buf[0..stdio_len]) catch {
-                return replyErr(notif.id, .IO);
-            };
+            try supervisor.stdout.write(supervisor.io, stdio_buf[0..stdio_len]);
         } else {
-            supervisor.stderr.write(supervisor.io, stdio_buf[0..stdio_len]) catch {
-                return replyErr(notif.id, .IO);
-            };
+            try supervisor.stderr.write(supervisor.io, stdio_buf[0..stdio_len]);
         }
         return replySuccess(notif.id, @intCast(stdio_len));
     }
@@ -69,15 +59,12 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         defer supervisor.mutex.unlock(supervisor.io);
 
         // Get caller Thread
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            logger.log("writev: Thread not found for tid={d}: {}", .{ caller_tid, err });
-            return replyErr(notif.id, .SRCH);
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
         std.debug.assert(caller.tid == caller_tid);
 
         file = caller.fd_table.get_ref(fd) orelse {
             logger.log("writev: EBADF for fd={d}", .{fd});
-            return replyErr(notif.id, .BADF);
+            return LinuxErr.BADF;
         };
     }
     defer file.unref();
@@ -89,9 +76,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
     for (0..iovec_count) |i| {
         const iov_addr = iovec_ptr + i * @sizeOf(iovec_const);
-        iovecs[i] = memory_bridge.read(iovec_const, caller_tid, iov_addr) catch {
-            return replyErr(notif.id, .FAULT);
-        };
+        iovecs[i] = try memory_bridge.read(iovec_const, caller_tid, iov_addr);
     }
 
     // Read buffer data from child memory for each iovec
@@ -102,18 +87,13 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
         if (buf_len > 0) {
             const dest = data_buf[data_len..][0..buf_len];
-            memory_bridge.readSlice(dest, caller_tid, buf_ptr) catch {
-                return replyErr(notif.id, .FAULT);
-            };
+            try memory_bridge.readSlice(dest, caller_tid, buf_ptr);
             data_len += buf_len;
         }
     }
 
     // Write to the File
-    const n = file.write(data_buf[0..data_len]) catch |err| {
-        logger.log("writev: error writing to fd: {s}", .{@errorName(err)});
-        return replyErr(notif.id, .IO);
-    };
+    const n = try file.write(data_buf[0..data_len]);
 
     logger.log("writev: wrote {d} bytes", .{n});
     return replySuccess(notif.id, @intCast(n));
@@ -121,7 +101,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const isContinue = @import("../../../seccomp/notif.zig").isContinue;
 const FdTable = @import("../../fs/FdTable.zig");
 const Tmp = @import("../../fs/backend/tmp.zig").Tmp;
@@ -153,8 +132,7 @@ test "writev single iovec writes data" {
         .arg2 = 1,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 5), resp.val);
 }
 
@@ -189,8 +167,7 @@ test "writev multiple iovecs concatenated write" {
         .arg2 = 3,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 11), resp.val);
 }
 
@@ -218,8 +195,7 @@ test "writev FD 1 (stdout) captures into log buffer" {
         .arg2 = 1,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 5), resp.val);
 }
 
@@ -247,8 +223,7 @@ test "writev FD 2 (stderr) captures into log buffer" {
         .arg2 = 1,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 5), resp.val);
 }
 
@@ -271,26 +246,24 @@ test "writev stdout: write, write, drain, write, drain" {
         .{ .base = d1a.ptr, .len = d1a.len },
         .{ .base = d1b.ptr, .len = d1b.len },
     };
-    const r1 = handle(makeNotif(.writev, .{
+    _ = try handle(makeNotif(.writev, .{
         .pid = init_tid,
         .arg0 = 1,
         .arg1 = @intFromPtr(&iovecs1),
         .arg2 = 2,
     }), &supervisor);
-    try testing.expect(!isError(r1));
 
     // writev "world"
     const d2 = "world";
     var iovecs2 = [_]iovec_const{
         .{ .base = d2.ptr, .len = d2.len },
     };
-    const r2 = handle(makeNotif(.writev, .{
+    _ = try handle(makeNotif(.writev, .{
         .pid = init_tid,
         .arg0 = 1,
         .arg1 = @intFromPtr(&iovecs2),
         .arg2 = 1,
     }), &supervisor);
-    try testing.expect(!isError(r2));
 
     // drain — should see "hel" + "lo " + "world"
     const drain1 = try supervisor.stdout.read(allocator, io);
@@ -302,13 +275,12 @@ test "writev stdout: write, write, drain, write, drain" {
     var iovecs3 = [_]iovec_const{
         .{ .base = d3.ptr, .len = d3.len },
     };
-    const r3 = handle(makeNotif(.writev, .{
+    _ = try handle(makeNotif(.writev, .{
         .pid = init_tid,
         .arg0 = 1,
         .arg1 = @intFromPtr(&iovecs3),
         .arg2 = 1,
     }), &supervisor);
-    try testing.expect(!isError(r3));
 
     // drain — should see only "!"
     const drain2 = try supervisor.stdout.read(allocator, io);
@@ -339,7 +311,5 @@ test "writev non-existent VFD returns EBADF" {
         .arg2 = 1,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
+    try testing.expectError(error.BADF, handle(notif, &supervisor));
 }

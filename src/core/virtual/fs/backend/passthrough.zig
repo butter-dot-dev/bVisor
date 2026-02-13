@@ -1,32 +1,28 @@
 const std = @import("std");
 const linux = std.os.linux;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const OverlayRoot = @import("../../OverlayRoot.zig");
 
 fn sysOpenat(path: []const u8, flags: linux.O, mode: linux.mode_t) !linux.fd_t {
     var path_buf: [513]u8 = undefined;
-    if (path.len > 512) return error.NameTooLong;
+    if (path.len > 512) return error.NAMETOOLONG;
     @memcpy(path_buf[0..path.len], path);
     path_buf[path.len] = 0;
     const rc = linux.openat(linux.AT.FDCWD, path_buf[0..path.len :0], flags, mode);
-    const errno = linux.errno(rc);
-    if (errno != .SUCCESS) return switch (errno) {
-        .NOENT => error.FileNotFound,
-        .ACCES, .PERM => error.AccessDenied,
-        else => error.SyscallFailed,
-    };
+    try checkErr(rc, "passthrough.sysOpenat", .{});
     return @intCast(rc);
 }
 
 fn sysRead(fd: linux.fd_t, buf: []u8) !usize {
     if (buf.len == 0) return 0;
     const rc = linux.read(fd, buf.ptr, buf.len);
-    if (linux.errno(rc) != .SUCCESS) return error.SyscallFailed;
+    try checkErr(rc, "passthrough.sysRead", .{});
     return rc;
 }
 
 fn sysWrite(fd: linux.fd_t, data: []const u8) !usize {
     const rc = linux.write(fd, data.ptr, data.len);
-    if (linux.errno(rc) != .SUCCESS) return error.SyscallFailed;
+    try checkErr(rc, "passthrough.sysWrite", .{});
     return rc;
 }
 
@@ -62,12 +58,12 @@ pub const Passthrough = struct {
             linux.STATX.BASIC_STATS,
             &statx_buf,
         );
-        if (linux.errno(rc) != .SUCCESS) return error.StatxFail;
+        try checkErr(rc, "passthrough.statx", .{});
         return statx_buf;
     }
 
     pub fn statxByPath(path: []const u8) !linux.Statx {
-        if (comptime builtin.os.tag != .linux) return error.StatxFail;
+        if (comptime builtin.os.tag != .linux) return error.NOSYS;
 
         // Open O_PATH (no permissions needed, works on any file type)
         const fd = try sysOpenat(path, .{ .PATH = true }, 0);
@@ -81,24 +77,24 @@ pub const Passthrough = struct {
             linux.STATX.BASIC_STATS,
             &statx_buf,
         );
-        if (linux.errno(rc) != .SUCCESS) return error.StatxFail;
+        try checkErr(rc, "passthrough.statxByPath", .{});
         return statx_buf;
     }
 
     pub fn lseek(self: *Passthrough, offset: i64, whence: u32) !i64 {
-        const result = linux.lseek(self.fd, offset, @intCast(whence));
-        if (linux.errno(result) != .SUCCESS) return error.SyscallFailed;
-        return @intCast(result);
+        const rc = linux.lseek(self.fd, offset, @intCast(whence));
+        try checkErr(rc, "passthrough.lseek", .{});
+        return @intCast(rc);
     }
 
     pub fn connect(self: *Passthrough, addr: [*]const u8, addrlen: linux.socklen_t) !void {
         const rc = linux.connect(self.fd, @ptrCast(addr), addrlen);
-        if (linux.errno(rc) != .SUCCESS) return error.SyscallFailed;
+        try checkErr(rc, "passthrough.connect", .{});
     }
 
     pub fn shutdown(self: *Passthrough, how: i32) !void {
         const rc = linux.shutdown(self.fd, how);
-        if (linux.errno(rc) != .SUCCESS) return error.SyscallFailed;
+        try checkErr(rc, "passthrough.shutdown", .{});
     }
 
     pub fn recvFrom(self: *Passthrough, buf: []u8, flags: u32, src_addr: ?[*]u8, src_addrlen: ?*linux.socklen_t) !usize {

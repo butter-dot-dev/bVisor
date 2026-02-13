@@ -1,14 +1,14 @@
 const std = @import("std");
 const linux = std.os.linux;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
 const Supervisor = @import("../../../Supervisor.zig");
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 const memory_bridge = @import("../../../utils/memory_bridge.zig");
 
-pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
+pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOMP.notif_resp {
     const logger = supervisor.logger;
     const allocator = supervisor.allocator;
 
@@ -23,63 +23,30 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     // Create the kernel socket pair
     var kernel_fds: [2]i32 = undefined;
     const rc = linux.socketpair(domain, sock_type, protocol, &kernel_fds);
-    const errno = linux.errno(rc);
-    if (errno != .SUCCESS) {
-        logger.log("socketpair: kernel socketpair failed: {s}", .{@tagName(errno)});
-        return replyErr(notif.id, errno);
-    }
+    try checkErr(rc, "socketpair: kernel socketpair failed", .{});
 
     // Wrap both ends as passthrough Files
-    const file0 = File.init(allocator, .{ .passthrough = .{ .fd = kernel_fds[0] } }) catch {
-        _ = linux.close(kernel_fds[0]);
-        _ = linux.close(kernel_fds[1]);
-        logger.log("socketpair: failed to alloc File 0", .{});
-        return replyErr(notif.id, .NOMEM);
-    };
+    const file0 = try File.init(allocator, .{ .passthrough = .{ .fd = kernel_fds[0] } });
+    errdefer file0.unref();
 
-    const file1 = File.init(allocator, .{ .passthrough = .{ .fd = kernel_fds[1] } }) catch {
-        file0.unref();
-        _ = linux.close(kernel_fds[1]);
-        logger.log("socketpair: failed to alloc File 1", .{});
-        return replyErr(notif.id, .NOMEM);
-    };
+    const file1 = try File.init(allocator, .{ .passthrough = .{ .fd = kernel_fds[1] } });
+    errdefer file1.unref();
 
     // Register both in the caller's FdTable
     supervisor.mutex.lockUncancelable(supervisor.io);
     defer supervisor.mutex.unlock(supervisor.io);
 
-    const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-        file0.unref();
-        file1.unref();
-        logger.log("socketpair: Thread not found for tid={d}: {}", .{ caller_tid, err });
-        return replyErr(notif.id, .SRCH);
-    };
+    const caller = try supervisor.guest_threads.get(caller_tid);
 
-    const vfd0 = caller.fd_table.insert(file0, .{ .cloexec = cloexec }) catch {
-        file0.unref();
-        file1.unref();
-        logger.log("socketpair: failed to insert fd 0", .{});
-        return replyErr(notif.id, .MFILE);
-    };
+    const vfd0 = try caller.fd_table.insert(file0, .{ .cloexec = cloexec });
+    errdefer _ = caller.fd_table.remove(vfd0);
 
-    const vfd1 = caller.fd_table.insert(file1, .{ .cloexec = cloexec }) catch {
-        _ = caller.fd_table.remove(vfd0);
-        file0.unref();
-        file1.unref();
-        logger.log("socketpair: failed to insert fd 1", .{});
-        return replyErr(notif.id, .MFILE);
-    };
+    const vfd1 = try caller.fd_table.insert(file1, .{ .cloexec = cloexec });
+    errdefer _ = caller.fd_table.remove(vfd1);
 
     // Write the virtual fds back to the caller's sv[2] array
     const vfds = [2]i32{ vfd0, vfd1 };
-    memory_bridge.write([2]i32, caller_tid, vfds, sv_ptr) catch |err| {
-        _ = caller.fd_table.remove(vfd0);
-        _ = caller.fd_table.remove(vfd1);
-        file0.unref();
-        file1.unref();
-        logger.log("socketpair: failed to write fds to caller: {}", .{err});
-        return replyErr(notif.id, .FAULT);
-    };
+    try memory_bridge.write([2]i32, caller_tid, vfds, sv_ptr);
 
     logger.log("socketpair: created vfd0={d} vfd1={d}", .{ vfd0, vfd1 });
     return replySuccess(notif.id, 0);
@@ -87,7 +54,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const LogBuffer = @import("../../../LogBuffer.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 
@@ -111,8 +77,7 @@ test "socketpair creates two virtual fds and writes them back" {
         .arg3 = @intFromPtr(&sv),
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 
     // Both vfds should be >= 3
@@ -151,8 +116,7 @@ test "socketpair with SOCK_CLOEXEC sets cloexec flag" {
         .arg3 = @intFromPtr(&sv),
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    _ = try handle(notif, &supervisor);
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
     try testing.expect(caller.fd_table.getCloexec(sv[0]));
@@ -179,7 +143,5 @@ test "socketpair unknown caller returns ESRCH" {
         .arg3 = @intFromPtr(&sv),
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+    try testing.expectError(error.SRCH, handle(notif, &supervisor));
 }

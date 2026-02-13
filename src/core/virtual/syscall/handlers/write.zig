@@ -1,6 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
-const types = @import("../../../types.zig");
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
@@ -9,14 +9,12 @@ const generateUid = @import("../../../setup.zig").generateUid;
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const replyErr = @import("../../../seccomp/notif.zig").replyErr;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const isContinue = @import("../../../seccomp/notif.zig").isContinue;
 const replyContinue = @import("../../../seccomp/notif.zig").replyContinue;
 
 const memory_bridge = @import("../../../utils/memory_bridge.zig");
 
-pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
+pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOMP.notif_resp {
     const logger = supervisor.logger;
 
     // Parse args
@@ -31,17 +29,11 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         var max_buf: [max_len]u8 = undefined;
         const max_count = @min(count, max_len);
         const buf: []u8 = max_buf[0..max_count];
-        memory_bridge.readSlice(buf, @intCast(caller_tid), buf_addr) catch {
-            return replyErr(notif.id, .FAULT);
-        };
+        try memory_bridge.readSlice(buf, @intCast(caller_tid), buf_addr);
         if (fd == linux.STDOUT_FILENO) {
-            supervisor.stdout.write(supervisor.io, buf) catch {
-                return replyErr(notif.id, .IO);
-            };
+            try supervisor.stdout.write(supervisor.io, buf);
         } else {
-            supervisor.stderr.write(supervisor.io, buf) catch {
-                return replyErr(notif.id, .IO);
-            };
+            try supervisor.stderr.write(supervisor.io, buf);
         }
         return replySuccess(notif.id, @intCast(max_count));
     }
@@ -54,15 +46,12 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         defer supervisor.mutex.unlock(supervisor.io);
 
         // Get caller Thread
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            logger.log("write: Thread not found for tid={d}: {}", .{ caller_tid, err });
-            return replyErr(notif.id, .SRCH);
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
         std.debug.assert(caller.tid == caller_tid);
 
         file = caller.fd_table.get_ref(fd) orelse {
             logger.log("write: EBADF for fd={d}", .{fd});
-            return replyErr(notif.id, .BADF);
+            return LinuxErr.BADF;
         };
     }
     defer file.unref();
@@ -72,15 +61,10 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     var max_buf: [max_len]u8 = undefined;
     const max_count = @min(count, max_len);
     const buf: []u8 = max_buf[0..max_count];
-    memory_bridge.readSlice(buf, @intCast(caller_tid), buf_addr) catch {
-        return replyErr(notif.id, .FAULT);
-    };
+    try memory_bridge.readSlice(buf, @intCast(caller_tid), buf_addr);
 
     // Write local buf to file
-    const n = file.write(buf) catch |err| {
-        logger.log("write: error writing to fd: {s}", .{@errorName(err)});
-        return replyErr(notif.id, .IO);
-    };
+    const n = try file.write(buf);
 
     logger.log("write: wrote {d} bytes", .{n});
     return replySuccess(notif.id, @intCast(n));
@@ -111,8 +95,7 @@ test "write to FD 1 (stdout) captures into log buffer" {
         .arg2 = data.len,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 5), resp.val);
 }
 
@@ -136,8 +119,7 @@ test "write to FD 2 (stderr) captures into log buffer" {
         .arg2 = data.len,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 5), resp.val);
 }
 
@@ -155,23 +137,21 @@ test "write stdout: write, write, drain, write, drain" {
 
     // write "aaa"
     var d1 = "aaa".*;
-    const r1 = handle(makeNotif(.write, .{
+    _ = try handle(makeNotif(.write, .{
         .pid = init_tid,
         .arg0 = 1,
         .arg1 = @intFromPtr(&d1),
         .arg2 = d1.len,
     }), &supervisor);
-    try testing.expect(!isError(r1));
 
     // write "bbb"
     var d2 = "bbb".*;
-    const r2 = handle(makeNotif(.write, .{
+    _ = try handle(makeNotif(.write, .{
         .pid = init_tid,
         .arg0 = 1,
         .arg1 = @intFromPtr(&d2),
         .arg2 = d2.len,
     }), &supervisor);
-    try testing.expect(!isError(r2));
 
     // drain — should see "aaabbb"
     const drain1 = try supervisor.stdout.read(allocator, io);
@@ -180,13 +160,12 @@ test "write stdout: write, write, drain, write, drain" {
 
     // write "ccc"
     var d3 = "ccc".*;
-    const r3 = handle(makeNotif(.write, .{
+    _ = try handle(makeNotif(.write, .{
         .pid = init_tid,
         .arg0 = 1,
         .arg1 = @intFromPtr(&d3),
         .arg2 = d3.len,
     }), &supervisor);
-    try testing.expect(!isError(r3));
 
     // drain — should see only "ccc"
     const drain2 = try supervisor.stdout.read(allocator, io);
@@ -218,8 +197,7 @@ test "write count=0 returns 0" {
         .arg2 = 0,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 }
 
@@ -242,9 +220,7 @@ test "write to non-existent VFD returns EBADF" {
         .arg2 = data.len,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
+    try testing.expectError(error.BADF, handle(notif, &supervisor));
 }
 
 test "write with unknown caller PID returns ESRCH" {
@@ -266,12 +242,10 @@ test "write with unknown caller PID returns ESRCH" {
         .arg2 = data.len,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+    try testing.expectError(error.SRCH, handle(notif, &supervisor));
 }
 
-test "write to read-only backend (proc) returns EIO" {
+test "write to read-only backend (proc) returns EROFS" {
     const LogBuffer = @import("../../../LogBuffer.zig");
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
@@ -294,7 +268,5 @@ test "write to read-only backend (proc) returns EIO" {
         .arg2 = data.len,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.IO))), resp.@"error");
+    try testing.expectError(error.ROFS, handle(notif, &supervisor));
 }

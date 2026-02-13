@@ -1,15 +1,16 @@
 const std = @import("std");
 const linux = std.os.linux;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const path_router = @import("../../path.zig");
 const resolveAndRoute = path_router.resolveAndRoute;
 const Supervisor = @import("../../../Supervisor.zig");
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 const memory_bridge = @import("../../../utils/memory_bridge.zig");
 
-pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
+pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOMP.notif_resp {
     const logger = supervisor.logger;
 
     // Parse args: faccessat(dirfd, pathname, mode, flags)
@@ -20,13 +21,10 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
     // Read path from caller's memory
     var path_buf: [256]u8 = undefined;
-    const path = memory_bridge.readString(&path_buf, caller_tid, path_ptr) catch |err| {
-        logger.log("faccessat: failed to read path string: {}", .{err});
-        return replyErr(notif.id, .FAULT);
-    };
+    const path = try memory_bridge.readString(&path_buf, caller_tid, path_ptr);
 
     if (path.len == 0) {
-        return replyErr(notif.id, .INVAL);
+        return LinuxErr.INVAL;
     }
 
     // Determine base directory for path resolution
@@ -39,29 +37,26 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         defer supervisor.mutex.unlock(supervisor.io);
 
         // Get caller Thread
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            logger.log("faccessat: Thread not found for tid={d}: {}", .{ caller_tid, err });
-            return replyErr(notif.id, .SRCH);
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
 
         if (dirfd != -100) {
             const dir_file = caller.fd_table.get_ref(dirfd) orelse {
                 logger.log("faccessat: EBADF for dirfd={d}", .{dirfd});
-                return replyErr(notif.id, .BADF);
+                return LinuxErr.BADF;
             };
             defer dir_file.unref();
 
             const dir_path = dir_file.opened_path orelse {
                 logger.log("faccessat: dirfd={d} has no associated path", .{dirfd});
-                return replyErr(notif.id, .NOTDIR);
+                return LinuxErr.NOTDIR;
             };
-            if (dir_path.len > base_buf.len) return replyErr(notif.id, .NAMETOOLONG);
+            if (dir_path.len > base_buf.len) return LinuxErr.NAMETOOLONG;
             @memcpy(base_buf[0..dir_path.len], dir_path);
             break :blk base_buf[0..dir_path.len];
         }
 
         const c = caller.fs_info.cwd;
-        if (c.len > base_buf.len) return replyErr(notif.id, .NAMETOOLONG);
+        if (c.len > base_buf.len) return LinuxErr.NAMETOOLONG;
         @memcpy(base_buf[0..c.len], c);
         break :blk base_buf[0..c.len];
     };
@@ -69,13 +64,13 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     // Resolve path against base and route through access rules
     var resolve_buf: [512]u8 = undefined;
     const route_result = resolveAndRoute(base, path, &resolve_buf) catch {
-        return replyErr(notif.id, .NAMETOOLONG);
+        return LinuxErr.NAMETOOLONG;
     };
 
     switch (route_result) {
         .block => {
             logger.log("faccessat: blocked path: {s}", .{path});
-            return replyErr(notif.id, .ACCES);
+            return LinuxErr.ACCES;
         },
         .handle => |h| {
             switch (h.backend) {
@@ -85,21 +80,15 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
                     supervisor.mutex.lockUncancelable(supervisor.io);
                     defer supervisor.mutex.unlock(supervisor.io);
 
-                    supervisor.guest_threads.syncNewThreads() catch |err| {
-                        logger.log("faccessat: syncNewThreads failed: {}", .{err});
-                        return replyErr(notif.id, .NOSYS);
-                    };
+                    try supervisor.guest_threads.syncNewThreads();
 
                     // Get caller Thread
-                    const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-                        logger.log("faccessat: Thread not found for tid={d}: {}", .{ caller_tid, err });
-                        return replyErr(notif.id, .SRCH);
-                    };
+                    const caller = try supervisor.guest_threads.get(caller_tid);
 
                     const ProcFile = @import("../../fs/backend/procfile.zig").ProcFile;
                     _ = ProcFile.open(caller, h.normalized) catch {
                         logger.log("faccessat: proc path not found: {s}", .{h.normalized});
-                        return replyErr(notif.id, .NOENT);
+                        return LinuxErr.NOENT;
                     };
 
                     logger.log("faccessat: proc path accessible: {s}", .{h.normalized});
@@ -109,16 +98,12 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
                 .passthrough, .cow, .tmp => {
                     // Null-terminate the normalized path for kernel syscall
                     var kern_path_buf: [513]u8 = undefined;
-                    if (h.normalized.len >= kern_path_buf.len) return replyErr(notif.id, .NAMETOOLONG);
+                    if (h.normalized.len >= kern_path_buf.len) return LinuxErr.NAMETOOLONG;
                     @memcpy(kern_path_buf[0..h.normalized.len], h.normalized);
                     kern_path_buf[h.normalized.len] = 0;
 
                     const rc = linux.faccessat(linux.AT.FDCWD, kern_path_buf[0..h.normalized.len :0], mode, 0);
-                    const errno = linux.errno(rc);
-                    if (errno != .SUCCESS) {
-                        logger.log("faccessat: kernel check failed for {s}: {s}", .{ h.normalized, @tagName(errno) });
-                        return replyErr(notif.id, errno);
-                    }
+                    try checkErr(rc, "faccessat: kernel check failed for {s}", .{h.normalized});
 
                     logger.log("faccessat: accessible: {s}", .{h.normalized});
                     return replySuccess(notif.id, 0);
@@ -130,7 +115,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const LogBuffer = @import("../../../LogBuffer.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 
@@ -153,9 +137,7 @@ test "faccessat blocked path returns EACCES" {
     var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
-    const resp = handle(makeAccessatNotif(init_tid, "/sys/class/net", 0), &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.ACCES))), resp.@"error");
+    try testing.expectError(error.ACCES, handle(makeAccessatNotif(init_tid, "/sys/class/net", 0), &supervisor));
 }
 
 test "faccessat /proc/self returns success" {
@@ -168,8 +150,7 @@ test "faccessat /proc/self returns success" {
     var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
-    const resp = handle(makeAccessatNotif(init_tid, "/proc/self", 0), &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(makeAccessatNotif(init_tid, "/proc/self", 0), &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 }
 
@@ -184,8 +165,7 @@ test "faccessat relative path resolves against cwd" {
     defer supervisor.deinit();
 
     // cwd is "/" so "proc/self" resolves to "/proc/self" (same as the absolute path test)
-    const resp = handle(makeAccessatNotif(init_tid, "proc/self", 0), &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(makeAccessatNotif(init_tid, "proc/self", 0), &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 }
 
@@ -199,9 +179,7 @@ test "faccessat unknown caller returns ESRCH" {
     var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
-    const resp = handle(makeAccessatNotif(999, "/proc/self", 0), &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+    try testing.expectError(error.SRCH, handle(makeAccessatNotif(999, "/proc/self", 0), &supervisor));
 }
 
 test "faccessat /proc/999 non-existent returns ENOENT" {
@@ -214,7 +192,5 @@ test "faccessat /proc/999 non-existent returns ENOENT" {
     var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
-    const resp = handle(makeAccessatNotif(init_tid, "/proc/999", 0), &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.NOENT))), resp.@"error");
+    try testing.expectError(error.NOENT, handle(makeAccessatNotif(init_tid, "/proc/999", 0), &supervisor));
 }

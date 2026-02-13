@@ -1,7 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
-const types = @import("../types.zig");
-const Result = types.LinuxResult;
+const checkErr = @import("../linux_error.zig").checkErr;
 
 const BPFInstruction = extern struct {
     code: u16,
@@ -34,14 +33,14 @@ pub fn install() !linux.fd_t {
 
     // Set NO_NEW_PRIVS mode
     // Required before installing seccomp filter
-    const prctl_rc = linux.prctl(@intFromEnum(linux.PR.SET_NO_NEW_PRIVS), 1, 0, 0, 0);
-    if (linux.errno(prctl_rc) != .SUCCESS) return error.SyscallFailed;
+    const rc = linux.prctl(@intFromEnum(linux.PR.SET_NO_NEW_PRIVS), 1, 0, 0, 0);
+    try checkErr(rc, "prctl: failed to set NO_NEW_PRIVS", .{});
 
-    return try Result(linux.fd_t).from(
-        linux.seccomp(
-            linux.SECCOMP.SET_MODE_FILTER,
-            linux.SECCOMP.FILTER_FLAG.NEW_LISTENER,
-            @ptrCast(&prog),
-        ),
-    ).unwrap();
+    const seccomp_rc = linux.seccomp(
+        linux.SECCOMP.SET_MODE_FILTER,
+        linux.SECCOMP.FILTER_FLAG.NEW_LISTENER,
+        @ptrCast(&prog),
+    );
+    if (linux.errno(seccomp_rc) != .SUCCESS) return error.SyscallFailed;
+    return @intCast(seccomp_rc);
 }

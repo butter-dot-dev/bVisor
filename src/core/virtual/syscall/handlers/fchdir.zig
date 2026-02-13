@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const linux = std.os.linux;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
 const Supervisor = @import("../../../Supervisor.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
@@ -8,11 +9,10 @@ const File = @import("../../fs/File.zig");
 const path_router = @import("../../path.zig");
 const route = path_router.route;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 
 /// Changes the current working directory to the directory referenced by the given fd.
 /// The fd must have been opened with openat and must refer to a directory.
-pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
+pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOMP.notif_resp {
     const logger = supervisor.logger;
 
     // Parse args: fchdir(int fd)
@@ -23,48 +23,40 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     defer supervisor.mutex.unlock(supervisor.io);
 
     // Get caller Thread
-    const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-        logger.log("fchdir: Thread not found for tid={d}: {}", .{ caller_tid, err });
-        return replyErr(notif.id, .SRCH);
-    };
+    const caller = try supervisor.guest_threads.get(caller_tid);
     std.debug.assert(caller.tid == caller_tid);
 
     // Look up fd in caller's fd_table
     const file = caller.fd_table.get_ref(fd) orelse {
         logger.log("fchdir: EBADF for fd={d}", .{fd});
-        return replyErr(notif.id, .BADF);
+        return LinuxErr.BADF;
     };
     defer file.unref();
 
     // Get the path this fd was opened with
     const path = file.opened_path orelse {
         logger.log("fchdir: fd={d} has no associated path", .{fd});
-        return replyErr(notif.id, .NOTDIR);
+        return LinuxErr.NOTDIR;
     };
 
     // Validate path through routing rules before updating cwd
     const route_result = route(path) catch {
-        return replyErr(notif.id, .NAMETOOLONG);
+        return LinuxErr.NAMETOOLONG;
     };
     if (route_result == .block) {
         logger.log("fchdir: blocked path: {s}", .{path});
-        return replyErr(notif.id, .PERM);
+        return LinuxErr.PERM;
     }
 
     // Verify it's a directory via statx
-    const statx_buf = file.statx() catch |err| {
-        logger.log("fchdir: statx failed for fd={d}: {}", .{ fd, err });
-        return replyErr(notif.id, .IO);
-    };
+    const statx_buf = try file.statx();
 
     if (statx_buf.mode & linux.S.IFMT != linux.S.IFDIR) {
-        return replyErr(notif.id, .NOTDIR);
+        return LinuxErr.NOTDIR;
     }
 
     // Update cwd
-    caller.fs_info.setCwd(path) catch {
-        return replyErr(notif.id, .NOMEM);
-    };
+    try caller.fs_info.setCwd(path);
 
     logger.log("fchdir: changed to {s}", .{caller.fs_info.cwd});
     return replySuccess(notif.id, 0);
@@ -72,7 +64,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const LogBuffer = @import("../../../LogBuffer.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 const openat = @import("openat.zig");
@@ -92,10 +83,7 @@ test "fchdir with unknown tid returns ESRCH" {
         .pid = 999,
         .arg0 = 3,
     });
-    const resp = handle(notif, &supervisor);
-
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+    try testing.expectError(error.SRCH, handle(notif, &supervisor));
 }
 
 test "fchdir with invalid fd returns EBADF" {
@@ -112,10 +100,7 @@ test "fchdir with invalid fd returns EBADF" {
         .pid = init_tid,
         .arg0 = 99, // no such fd
     });
-    const resp = handle(notif, &supervisor);
-
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
+    try testing.expectError(error.BADF, handle(notif, &supervisor));
 }
 
 test "fchdir on fd without opened_path returns ENOTDIR" {
@@ -137,10 +122,7 @@ test "fchdir on fd without opened_path returns ENOTDIR" {
         .pid = init_tid,
         .arg0 = @as(u64, @intCast(vfd)),
     });
-    const resp = handle(notif, &supervisor);
-
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.NOTDIR))), resp.@"error");
+    try testing.expectError(error.NOTDIR, handle(notif, &supervisor));
 }
 
 test "fchdir + getcwd roundtrip via openat" {
@@ -162,8 +144,7 @@ test "fchdir + getcwd roundtrip via openat" {
         .arg2 = @as(u64, 0), // O_RDONLY
         .arg3 = @as(u64, 0),
     });
-    const open_resp = openat.handle(open_notif, &supervisor);
-    try testing.expect(!isError(open_resp));
+    const open_resp = try openat.handle(open_notif, &supervisor);
     const dir_fd = open_resp.val;
 
     // fchdir to that fd
@@ -171,8 +152,7 @@ test "fchdir + getcwd roundtrip via openat" {
         .pid = init_tid,
         .arg0 = @as(u64, @intCast(dir_fd)),
     });
-    const fchdir_resp = handle(fchdir_notif, &supervisor);
-    try testing.expect(!isError(fchdir_resp));
+    _ = try handle(fchdir_notif, &supervisor);
 
     // getcwd should now return /tmp
     var buf: [256]u8 = undefined;
@@ -181,8 +161,7 @@ test "fchdir + getcwd roundtrip via openat" {
         .arg0 = @intFromPtr(&buf),
         .arg1 = buf.len,
     });
-    const getcwd_resp = getcwd.handle(getcwd_notif, &supervisor);
-    try testing.expect(!isError(getcwd_resp));
+    _ = try getcwd.handle(getcwd_notif, &supervisor);
     try testing.expectEqualStrings("/tmp", std.mem.sliceTo(&buf, 0));
 }
 
@@ -206,10 +185,7 @@ test "fchdir on fd with blocked path returns EPERM" {
         .pid = init_tid,
         .arg0 = @as(u64, @intCast(vfd)),
     });
-    const resp = handle(notif, &supervisor);
-
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.PERM))), resp.@"error");
+    try testing.expectError(error.PERM, handle(notif, &supervisor));
 }
 
 test "fchdir on non-directory fd returns ENOTDIR" {
@@ -238,8 +214,5 @@ test "fchdir on non-directory fd returns ENOTDIR" {
         .pid = init_tid,
         .arg0 = @as(u64, @intCast(vfd)),
     });
-    const resp = handle(notif, &supervisor);
-
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.NOTDIR))), resp.@"error");
+    try testing.expectError(error.NOTDIR, handle(notif, &supervisor));
 }

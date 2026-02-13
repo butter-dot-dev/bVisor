@@ -1,14 +1,14 @@
 const std = @import("std");
 const linux = std.os.linux;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
 const Supervisor = @import("../../../Supervisor.zig");
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 const memory_bridge = @import("../../../utils/memory_bridge.zig");
 
-pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
+pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOMP.notif_resp {
     const logger = supervisor.logger;
 
     // Parse args: connect(sockfd, addr, addrlen)
@@ -19,7 +19,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
     // Validate addrlen (sockaddr_storage max is 128)
     if (addrlen == 0 or addrlen > 128) {
-        return replyErr(notif.id, .INVAL);
+        return LinuxErr.INVAL;
     }
 
     // Critical section: File lookup
@@ -28,30 +28,20 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         supervisor.mutex.lockUncancelable(supervisor.io);
         defer supervisor.mutex.unlock(supervisor.io);
 
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            logger.log("connect: Thread not found for tid={d}: {}", .{ caller_tid, err });
-            return replyErr(notif.id, .SRCH);
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
 
         file = caller.fd_table.get_ref(fd) orelse {
             logger.log("connect: EBADF for fd={d}", .{fd});
-            return replyErr(notif.id, .BADF);
+            return LinuxErr.BADF;
         };
     }
     defer file.unref();
 
     // Read sockaddr from guest memory
     var addr_buf: [128]u8 = undefined;
-    memory_bridge.readSlice(addr_buf[0..addrlen], caller_tid, addr_ptr) catch {
-        return replyErr(notif.id, .FAULT);
-    };
+    try memory_bridge.readSlice(addr_buf[0..addrlen], caller_tid, addr_ptr);
 
-    file.connect(&addr_buf, addrlen) catch |err| {
-        return switch (err) {
-            error.NotASocket => replyErr(notif.id, .NOTSOCK),
-            else => replyErr(notif.id, .IO),
-        };
-    };
+    try file.connect(&addr_buf, addrlen);
 
     logger.log("connect: fd={d} success", .{fd});
     return replySuccess(notif.id, 0);
@@ -59,7 +49,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const LogBuffer = @import("../../../LogBuffer.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 const ProcFile = @import("../../fs/backend/procfile.zig").ProcFile;
@@ -83,9 +72,7 @@ test "connect unknown caller returns ESRCH" {
         .arg2 = @sizeOf(linux.sockaddr.un),
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+    try testing.expectError(error.SRCH, handle(notif, &supervisor));
 }
 
 test "connect invalid vfd returns EBADF" {
@@ -106,9 +93,7 @@ test "connect invalid vfd returns EBADF" {
         .arg2 = @sizeOf(linux.sockaddr.un),
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
+    try testing.expectError(error.BADF, handle(notif, &supervisor));
 }
 
 test "connect on non-socket file returns ENOTSOCK" {
@@ -134,9 +119,7 @@ test "connect on non-socket file returns ENOTSOCK" {
         .arg2 = @sizeOf(linux.sockaddr.un),
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.NOTSOCK))), resp.@"error");
+    try testing.expectError(error.NOTSOCK, handle(notif, &supervisor));
 }
 
 test "connect UDP socket to localhost succeeds" {
@@ -156,8 +139,7 @@ test "connect UDP socket to localhost succeeds" {
         .arg1 = linux.SOCK.DGRAM,
         .arg2 = 0,
     });
-    const sock_resp = socket_handler.handle(sock_notif, &supervisor);
-    try testing.expect(!isError(sock_resp));
+    const sock_resp = try socket_handler.handle(sock_notif, &supervisor);
     const vfd: i32 = @intCast(sock_resp.val);
 
     // UDP connect just sets the default destination, always succeeds
@@ -173,7 +155,6 @@ test "connect UDP socket to localhost succeeds" {
         .arg2 = @sizeOf(linux.sockaddr.in),
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 }

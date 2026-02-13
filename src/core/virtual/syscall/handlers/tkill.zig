@@ -1,15 +1,16 @@
 const std = @import("std");
 const linux = std.os.linux;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Supervisor = @import("../../../Supervisor.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const NsTid = Thread.NsTid;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 
 /// tkill(tid, sig) sends a signal to a specific thread.
 /// Unlike kill, tid is always a positive TID — no process group semantics.
-pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
+pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOMP.notif_resp {
 
     // Parse args
     const caller_tid: AbsTid = @intCast(notif.pid);
@@ -17,7 +18,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     const signal: u6 = @truncate(notif.data.arg1);
 
     if (target_nstid <= 0) {
-        return replyErr(notif.id, .INVAL);
+        return LinuxErr.INVAL;
     }
 
     // Critical section just to normalize target namespaced TID to absolute TID
@@ -27,17 +28,11 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         defer supervisor.mutex.unlock(supervisor.io);
 
         // Get caller Thread
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            std.log.err("tkill: Thread not found with tid={d}: {}", .{ caller_tid, err });
-            return replyErr(notif.id, .SRCH);
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
         std.debug.assert(caller.tid == caller_tid);
 
         // Lookup Thread with matching namespaced TID
-        const target = supervisor.guest_threads.getNamespaced(caller, target_nstid) catch |err| {
-            std.log.err("tkill: target Thread not found for tid={d}: {}", .{ target_nstid, err });
-            return replyErr(notif.id, .SRCH);
-        };
+        const target = try supervisor.guest_threads.getNamespaced(caller, target_nstid);
 
         // Yield the targetted TID in absolute terms
         target_abs_tid = target.tid;
@@ -45,10 +40,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
     // Execute real tkill syscall outside the lock
     const rc = linux.kill(@intCast(target_abs_tid), @enumFromInt(signal));
-    const errno = linux.errno(rc);
-    if (errno != .SUCCESS) {
-        return replyErr(notif.id, errno);
-    }
+    try checkErr(rc, "tkill", .{});
 
     // Do not remove from internal Threads tracking.
     // Killing a thread is just a signal invocation.

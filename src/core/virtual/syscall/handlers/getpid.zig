@@ -1,5 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
 const Supervisor = @import("../../../Supervisor.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 const LogBuffer = @import("../../../LogBuffer.zig");
@@ -13,11 +14,9 @@ const proc_info = @import("../../../utils/proc_info.zig");
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const replyErr = @import("../../../seccomp/notif.zig").replyErr;
-const isError = @import("../../../seccomp/notif.zig").isError;
 
 /// getpid return the namespaced TGID of the thread
-pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
+pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOMP.notif_resp {
     supervisor.mutex.lockUncancelable(supervisor.io);
     defer supervisor.mutex.unlock(supervisor.io);
 
@@ -25,16 +24,13 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     const caller_tid: AbsTid = @intCast(notif.pid);
 
     // Get caller Thread
-    const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-        std.log.err("getpid: Thread not found with tid={d}: {}", .{ caller_tid, err });
-        return replyErr(notif.id, .SRCH);
-    };
+    const caller = try supervisor.guest_threads.get(caller_tid);
     std.debug.assert(caller.tid == caller_tid);
 
     // Get leader of caller's ThreadGroup
     const leader = caller.thread_group.getLeader() catch |err| {
         std.log.err("getpid: Thread not found with tid={d}: {}", .{ caller.get_tgid(), err });
-        return replyErr(notif.id, .SRCH);
+        return LinuxErr.SRCH;
     };
 
     // Get namespaced TGID of the caller's ThreadGroup, which matches the namespaced TID of its leader
@@ -54,7 +50,7 @@ test "getpid returns init Thread's AbsTgid" {
     defer supervisor.deinit();
 
     const notif = makeNotif(.getpid, .{ .pid = init_tid });
-    const resp = handle(notif, &supervisor);
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(init_tid, resp.val);
 }
 
@@ -77,6 +73,6 @@ test "getpid for child Thread returns its AbsTgid" {
     // Child calls getpid
     //   ... supposing converted child's requested pid to be :AbsTid
     const notif = makeNotif(.getpid, .{ .pid = child_tid });
-    const resp = handle(notif, &supervisor);
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(child_tid, resp.val);
 }

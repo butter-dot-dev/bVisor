@@ -57,10 +57,6 @@ pub fn replyErr(id: u64, err: linux.E) linux.SECCOMP.notif_resp {
     };
 }
 
-pub fn isError(resp: linux.SECCOMP.notif_resp) bool {
-    return resp.@"error" != 0;
-}
-
 pub fn isContinue(resp: linux.SECCOMP.notif_resp) bool {
     return resp.flags == linux.SECCOMP.USER_NOTIF_FLAG_CONTINUE;
 }

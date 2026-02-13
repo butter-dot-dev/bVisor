@@ -1,5 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
 const Thread = @import("../../proc/Thread.zig");
 pub const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
@@ -7,10 +8,9 @@ const Supervisor = @import("../../../Supervisor.zig");
 const LogBuffer = @import("../../../LogBuffer.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 const replyContinue = @import("../../../seccomp/notif.zig").replyContinue;
 
-pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
+pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOMP.notif_resp {
     const logger = supervisor.logger;
 
     // Parse args
@@ -29,15 +29,12 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         defer supervisor.mutex.unlock(supervisor.io);
 
         // Get caller Thread
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            logger.log("close: Thread not found for tid={d}: {}", .{ caller_tid, err });
-            return replyErr(notif.id, .SRCH);
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
         std.debug.assert(caller.tid == caller_tid);
 
         file = caller.fd_table.get_ref(fd) orelse {
             logger.log("close: EBADF for fd={d}", .{fd});
-            return replyErr(notif.id, .BADF);
+            return LinuxErr.BADF;
         };
 
         // Remove the file from the fd table
@@ -52,7 +49,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const isContinue = @import("../../../seccomp/notif.zig").isContinue;
 const ProcFile = @import("../../fs/backend/procfile.zig").ProcFile;
 
@@ -75,8 +71,7 @@ test "close virtual FD returns success and removes from table" {
         .arg0 = @as(u64, @bitCast(@as(i64, vfd))),
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 
     // VFD should be gone
@@ -104,7 +99,7 @@ test "after close, read same VFD returns EBADF" {
         .pid = init_tid,
         .arg0 = @as(u64, @bitCast(@as(i64, vfd))),
     });
-    _ = handle(close_notif, &supervisor);
+    _ = try handle(close_notif, &supervisor);
 
     // Now try to read - should EBADF
     const read_handler = @import("read.zig");
@@ -116,9 +111,7 @@ test "after close, read same VFD returns EBADF" {
         .arg2 = result_buf.len,
     });
 
-    const resp = read_handler.handle(read_notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
+    try testing.expectError(error.BADF, read_handler.handle(read_notif, &supervisor));
 }
 
 test "close FD 0 (stdin) returns replyContinue" {
@@ -132,7 +125,7 @@ test "close FD 0 (stdin) returns replyContinue" {
     defer supervisor.deinit();
 
     const notif = makeNotif(.close, .{ .pid = init_tid, .arg0 = 0 });
-    const resp = handle(notif, &supervisor);
+    const resp = try handle(notif, &supervisor);
     try testing.expect(isContinue(resp));
 }
 
@@ -147,7 +140,7 @@ test "close FD 1 (stdout) returns replyContinue" {
     defer supervisor.deinit();
 
     const notif = makeNotif(.close, .{ .pid = init_tid, .arg0 = 1 });
-    const resp = handle(notif, &supervisor);
+    const resp = try handle(notif, &supervisor);
     try testing.expect(isContinue(resp));
 }
 
@@ -162,7 +155,7 @@ test "close FD 2 (stderr) returns replyContinue" {
     defer supervisor.deinit();
 
     const notif = makeNotif(.close, .{ .pid = init_tid, .arg0 = 2 });
-    const resp = handle(notif, &supervisor);
+    const resp = try handle(notif, &supervisor);
     try testing.expect(isContinue(resp));
 }
 
@@ -177,9 +170,7 @@ test "close non-existent VFD returns EBADF" {
     defer supervisor.deinit();
 
     const notif = makeNotif(.close, .{ .pid = init_tid, .arg0 = 99 });
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
+    try testing.expectError(error.BADF, handle(notif, &supervisor));
 }
 
 test "double close - first succeeds, second EBADF" {
@@ -202,13 +193,10 @@ test "double close - first succeeds, second EBADF" {
     });
 
     // First close succeeds
-    const resp1 = handle(notif, &supervisor);
-    try testing.expect(!isError(resp1));
+    _ = try handle(notif, &supervisor);
 
     // Second close returns EBADF
-    const resp2 = handle(notif, &supervisor);
-    try testing.expect(isError(resp2));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp2.@"error");
+    try testing.expectError(error.BADF, handle(notif, &supervisor));
 }
 
 test "close with unknown caller PID returns ESRCH" {
@@ -222,7 +210,5 @@ test "close with unknown caller PID returns ESRCH" {
     defer supervisor.deinit();
 
     const notif = makeNotif(.close, .{ .pid = 999, .arg0 = 3 });
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+    try testing.expectError(error.SRCH, handle(notif, &supervisor));
 }

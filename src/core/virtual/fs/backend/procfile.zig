@@ -22,29 +22,29 @@ pub const ProcFile = struct {
     pub fn parseProcPath(path: []const u8) !ProcTarget {
         // path comes in as the full path e.g. "/proc/self" or "/proc/123/status"
         const prefix = "/proc/";
-        if (!std.mem.startsWith(u8, path, prefix)) return error.InvalidPath;
+        if (!std.mem.startsWith(u8, path, prefix)) return error.NOENT;
         const remainder = path[prefix.len..];
-        if (remainder.len == 0) return error.InvalidPath;
+        if (remainder.len == 0) return error.NOENT;
 
         // /proc/self or /proc/self/status
         if (std.mem.startsWith(u8, remainder, "self")) {
             const after_self = remainder["self".len..];
             if (after_self.len == 0) return .self_nstgid;
             if (std.mem.eql(u8, after_self, "/status")) return .self_status;
-            return error.InvalidPath;
+            return error.NOENT;
         }
 
         // /proc/<N> or /proc/<N>/status
         const slash_pos = std.mem.indexOfScalar(u8, remainder, '/');
         const nstgid_str = if (slash_pos) |pos| remainder[0..pos] else remainder;
 
-        const nstgid = std.fmt.parseInt(NsTgid, nstgid_str, 10) catch return error.InvalidPath;
-        if (nstgid <= 0) return error.InvalidPath;
+        const nstgid = std.fmt.parseInt(NsTgid, nstgid_str, 10) catch return error.NOENT;
+        if (nstgid <= 0) return error.NOENT;
 
         if (slash_pos) |pos| {
             const subpath = remainder[pos..];
             if (std.mem.eql(u8, subpath, "/status")) return .{ .nstgid_status = nstgid };
-            return error.InvalidPath;
+            return error.NOENT;
         }
 
         return .{ .nstgid = nstgid };
@@ -62,7 +62,7 @@ pub const ProcFile = struct {
         switch (target) {
             .self_nstgid => {
                 const leader = try caller.thread_group.getLeader();
-                const nstgid = caller.namespace.getNsTid(leader) orelse return error.FileNotFound;
+                const nstgid = caller.namespace.getNsTid(leader) orelse return error.NOENT;
                 self.content_len = formatPid(&self.content, nstgid);
             },
             .self_status => {
@@ -71,13 +71,13 @@ pub const ProcFile = struct {
             .nstgid => |nstgid| {
                 // Note: this depends on syncNewThreads being called proactively, else risk a not-registered NsTgid.
                 // This syncNewThreads is called one level up, in openat.
-                const target_thread = caller.namespace.threads.get(nstgid) orelse return error.FileNotFound;
+                const target_thread = caller.namespace.threads.get(nstgid) orelse return error.NOENT;
                 _ = target_thread;
                 self.content_len = formatPid(&self.content, nstgid);
             },
             .nstgid_status => |nstgid| {
                 // Same case as above re: syncNewThreads
-                const target_thread = caller.namespace.threads.get(nstgid) orelse return error.FileNotFound;
+                const target_thread = caller.namespace.threads.get(nstgid) orelse return error.NOENT;
                 self.content_len = try formatStatus(&self.content, target_thread);
             },
         }
@@ -118,7 +118,7 @@ pub const ProcFile = struct {
     pub fn write(self: *ProcFile, data: []const u8) !usize {
         _ = self;
         _ = data;
-        return error.ReadOnlyFileSystem;
+        return error.ROFS;
     }
 
     pub fn close(self: *ProcFile) void {
@@ -163,22 +163,22 @@ pub const ProcFile = struct {
             linux.SEEK.SET => 0,
             linux.SEEK.CUR => @intCast(self.offset),
             linux.SEEK.END => @intCast(self.content_len),
-            else => return error.InvalidArgument,
+            else => return error.INVAL,
         };
-        const new_offset = std.math.add(i64, base, offset) catch return error.InvalidArgument;
-        if (new_offset < 0) return error.InvalidArgument;
+        const new_offset = std.math.add(i64, base, offset) catch return error.INVAL;
+        if (new_offset < 0) return error.INVAL;
         self.offset = @intCast(new_offset);
         return new_offset;
     }
 
     pub fn connect(self: *ProcFile, addr: [*]const u8, addrlen: linux.socklen_t) !void {
         _ = .{ self, addr, addrlen };
-        return error.NotASocket;
+        return error.NOTSOCK;
     }
 
     pub fn shutdown(self: *ProcFile, how: i32) !void {
         _ = .{ self, how };
-        return error.NotASocket;
+        return error.NOTSOCK;
     }
 
     pub fn recvFrom(self: *ProcFile, buf: []u8, flags: u32, src_addr: ?[*]u8, src_addrlen: ?*linux.socklen_t) !usize {
@@ -217,23 +217,23 @@ test "parseProcPath - /proc/123/status" {
 }
 
 test "parseProcPath - /proc/ alone is invalid" {
-    try testing.expectError(error.InvalidPath, ProcFile.parseProcPath("/proc/"));
+    try testing.expectError(error.NOENT, ProcFile.parseProcPath("/proc/"));
 }
 
 test "parseProcPath - /proc/self/bogus is invalid" {
-    try testing.expectError(error.InvalidPath, ProcFile.parseProcPath("/proc/self/bogus"));
+    try testing.expectError(error.NOENT, ProcFile.parseProcPath("/proc/self/bogus"));
 }
 
 test "parseProcPath - /proc/abc is invalid" {
-    try testing.expectError(error.InvalidPath, ProcFile.parseProcPath("/proc/abc"));
+    try testing.expectError(error.NOENT, ProcFile.parseProcPath("/proc/abc"));
 }
 
 test "parseProcPath - /proc/123/bogus is invalid" {
-    try testing.expectError(error.InvalidPath, ProcFile.parseProcPath("/proc/123/bogus"));
+    try testing.expectError(error.NOENT, ProcFile.parseProcPath("/proc/123/bogus"));
 }
 
 test "parseProcPath - /wrong/prefix is invalid" {
-    try testing.expectError(error.InvalidPath, ProcFile.parseProcPath("/wrong/self"));
+    try testing.expectError(error.NOENT, ProcFile.parseProcPath("/wrong/self"));
 }
 
 test "open /proc/self returns guest nstgid" {
@@ -298,7 +298,7 @@ test "open /proc/<N> returns error for non-existent pid" {
     try v_threads.handleInitialThread(100);
     const root = v_threads.lookup.get(100).?;
 
-    try testing.expectError(error.FileNotFound, ProcFile.open(root, "/proc/999"));
+    try testing.expectError(error.NOENT, ProcFile.open(root, "/proc/999"));
 }
 
 test "open /proc/<N>/status for visible Thread" {
@@ -335,15 +335,15 @@ test "write returns ReadOnlyFileSystem" {
     const proc = v_threads.lookup.get(100).?;
 
     var file = try ProcFile.open(proc, "/proc/self");
-    try testing.expectError(error.ReadOnlyFileSystem, file.write("test"));
+    try testing.expectError(error.ROFS, file.write("test"));
 }
 
 test "parseProcPath - /proc/0 (zero PID) is invalid" {
-    try testing.expectError(error.InvalidPath, ProcFile.parseProcPath("/proc/0"));
+    try testing.expectError(error.NOENT, ProcFile.parseProcPath("/proc/0"));
 }
 
 test "parseProcPath - /proc/-1 (negative) is invalid" {
-    try testing.expectError(error.InvalidPath, ProcFile.parseProcPath("/proc/-1"));
+    try testing.expectError(error.NOENT, ProcFile.parseProcPath("/proc/-1"));
 }
 
 test "child in new namespace (CLONE_NEWPID) /proc/self returns 1" {
@@ -425,7 +425,7 @@ test "open /proc/N where N is in different namespace returns FileNotFound" {
     const child = v_threads.lookup.get(200).?;
 
     // Child cannot see root (NsTgid 100) since root is not in child's namespace
-    try testing.expectError(error.FileNotFound, ProcFile.open(child, "/proc/100"));
+    try testing.expectError(error.NOENT, ProcFile.open(child, "/proc/100"));
 }
 
 test "read past end returns 0 (EOF)" {

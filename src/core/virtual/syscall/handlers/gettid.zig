@@ -5,10 +5,9 @@ const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const NsTid = Thread.NsTid;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 
 /// gettid returns the namespaced TID of a thread
-pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
+pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOMP.notif_resp {
     supervisor.mutex.lockUncancelable(supervisor.io);
     defer supervisor.mutex.unlock(supervisor.io);
 
@@ -16,10 +15,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     const caller_tid: AbsTid = @intCast(notif.pid);
 
     // Get caller Thread
-    const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-        std.log.err("gettid: Thread not found with tid={d}: {}", .{ caller_tid, err });
-        return replyErr(notif.id, .SRCH);
-    };
+    const caller = try supervisor.guest_threads.get(caller_tid);
     std.debug.assert(caller.tid == caller_tid);
 
     // Get namespaced TID of this caller Thread

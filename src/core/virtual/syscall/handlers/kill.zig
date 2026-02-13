@@ -1,5 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Supervisor = @import("../../../Supervisor.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 const LogBuffer = @import("../../../LogBuffer.zig");
@@ -11,11 +13,9 @@ const Threads = @import("../../proc/Threads.zig");
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const replyErr = @import("../../../seccomp/notif.zig").replyErr;
-const isError = @import("../../../seccomp/notif.zig").isError;
 
 // `kill` kills processes/thread groups specified by a namespaced TGID
-pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
+pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOMP.notif_resp {
 
     // Parse args
     const caller_tid: AbsTid = @intCast(notif.pid);
@@ -25,7 +25,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     // Non-positive namespaced TGIDs not supported, for now
     // TODO: support all integer target PIDS
     if (target_nstgid <= 0) {
-        return replyErr(notif.id, .INVAL);
+        return LinuxErr.INVAL;
     }
 
     // Critical section just to normalize target namespaced TGID to absolute
@@ -35,18 +35,12 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         defer supervisor.mutex.unlock(supervisor.io);
 
         // Get caller Thread
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            std.log.err("kill: Thread not found with tid={d}: {}", .{ caller_tid, err });
-            return replyErr(notif.id, .SRCH);
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
         std.debug.assert(caller.tid == caller_tid);
 
         // There may be *many* candidate Thread-s satisfying having namespaced TGID == target_nstgid.
         // But, we know there must be a group leader whose namespaced TID == target_nstgid
-        const target_leader = supervisor.guest_threads.getNamespaced(caller, target_nstgid) catch |err| {
-            std.log.err("kill: target Thread not found with tid={d}: {}", .{ target_nstgid, err });
-            return replyErr(notif.id, .SRCH);
-        };
+        const target_leader = try supervisor.guest_threads.getNamespaced(caller, target_nstgid);
 
         // Yield the targetted TGID in absolute terms
         target_abstgid = target_leader.get_tgid();
@@ -55,10 +49,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
     // Execute real kill syscall outside the lock
     const rc = linux.kill(@intCast(target_abstgid), @enumFromInt(signal));
-    const errno = linux.errno(rc);
-    if (errno != .SUCCESS) {
-        return replyErr(notif.id, errno);
-    }
+    try checkErr(rc, "kill", .{});
 
     // Do not remove from internal Threads tracking.
     // Killing a thread is just a signal invocation.
@@ -82,9 +73,7 @@ test "kill with negative pid returns EINVAL" {
         .arg1 = 9,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intFromEnum(linux.E.INVAL)), resp.@"error");
+    try testing.expectError(error.INVAL, handle(notif, &supervisor));
 }
 
 test "kill with zero pid returns EINVAL" {
@@ -102,7 +91,5 @@ test "kill with zero pid returns EINVAL" {
         .arg1 = 9,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intFromEnum(linux.E.INVAL)), resp.@"error");
+    try testing.expectError(error.INVAL, handle(notif, &supervisor));
 }

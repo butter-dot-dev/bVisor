@@ -1,33 +1,29 @@
 const std = @import("std");
 const linux = std.os.linux;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const OverlayRoot = @import("../../OverlayRoot.zig");
 
 const BackingFD = linux.fd_t;
 
 fn sysOpenat(path: []const u8, flags: linux.O, mode: linux.mode_t) !linux.fd_t {
     var path_buf: [513]u8 = undefined;
-    if (path.len > 512) return error.NameTooLong;
+    if (path.len > 512) return error.NAMETOOLONG;
     @memcpy(path_buf[0..path.len], path);
     path_buf[path.len] = 0;
     const rc = linux.openat(linux.AT.FDCWD, path_buf[0..path.len :0], flags, mode);
-    const errno = linux.errno(rc);
-    if (errno != .SUCCESS) return switch (errno) {
-        .NOENT => error.FileNotFound,
-        .ACCES, .PERM => error.AccessDenied,
-        else => error.SyscallFailed,
-    };
+    try checkErr(rc, "cow.sysOpenat", .{});
     return @intCast(rc);
 }
 
 fn sysRead(fd: linux.fd_t, buf: []u8) !usize {
     const rc = linux.read(fd, buf.ptr, buf.len);
-    if (linux.errno(rc) != .SUCCESS) return error.SyscallFailed;
+    try checkErr(rc, "cow.sysRead", .{});
     return rc;
 }
 
 fn sysWrite(fd: linux.fd_t, data: []const u8) !usize {
     const rc = linux.write(fd, data.ptr, data.len);
-    if (linux.errno(rc) != .SUCCESS) return error.SyscallFailed;
+    try checkErr(rc, "cow.sysWrite", .{});
     return rc;
 }
 
@@ -69,7 +65,7 @@ pub const Cow = union(enum) {
 
     pub fn write(self: *Cow, data: []const u8) !usize {
         switch (self.*) {
-            .readthrough => return error.ReadOnlyFileSystem,
+            .readthrough => return error.ROFS,
             .writecopy => |fd| return sysWrite(fd, data),
         }
     }
@@ -96,12 +92,12 @@ pub const Cow = union(enum) {
             linux.STATX.BASIC_STATS,
             &statx_buf,
         );
-        if (linux.errno(rc) != .SUCCESS) return error.StatxFail;
+        try checkErr(rc, "cow.statx", .{});
         return statx_buf;
     }
 
     pub fn statxByPath(overlay: *OverlayRoot, path: []const u8) !linux.Statx {
-        if (comptime builtin.os.tag != .linux) return error.StatxFail;
+        if (comptime builtin.os.tag != .linux) return error.NOSYS;
 
         var cow_path_buf: [512]u8 = undefined;
         const real_path = if (overlay.cowExists(path))
@@ -120,7 +116,7 @@ pub const Cow = union(enum) {
             linux.STATX.BASIC_STATS,
             &statx_buf,
         );
-        if (linux.errno(rc) != .SUCCESS) return error.StatxFail;
+        try checkErr(rc, "cow.statxByPath", .{});
         return statx_buf;
     }
 
@@ -128,19 +124,19 @@ pub const Cow = union(enum) {
         const fd = switch (self.*) {
             inline else => |fd| fd,
         };
-        const result = linux.lseek(fd, offset, @intCast(whence));
-        if (linux.errno(result) != .SUCCESS) return error.SyscallFailed;
-        return @intCast(result);
+        const rc = linux.lseek(fd, offset, @intCast(whence));
+        try checkErr(rc, "cow.statxByPath", .{});
+        return @intCast(rc);
     }
 
     pub fn connect(self: *Cow, addr: [*]const u8, addrlen: linux.socklen_t) !void {
         _ = .{ self, addr, addrlen };
-        return error.NotASocket;
+        return error.NOTSOCK;
     }
 
     pub fn shutdown(self: *Cow, how: i32) !void {
         _ = .{ self, how };
-        return error.NotASocket;
+        return error.NOTSOCK;
     }
 
     pub fn recvFrom(self: *Cow, buf: []u8, flags: u32, src_addr: ?[*]u8, src_addrlen: ?*linux.socklen_t) !usize {
@@ -201,7 +197,7 @@ test "write to readthrough returns error" {
     defer file.close();
 
     // Writing to a readthrough file should fail with ReadOnlyFileSystem
-    try testing.expectError(error.ReadOnlyFileSystem, file.write("test"));
+    try testing.expectError(error.ROFS, file.write("test"));
 }
 
 test "opening /usr/bin/ls for write triggers copy to overlay" {
@@ -447,7 +443,7 @@ test "open non-existent file RDONLY returns ENOENT" {
     defer overlay.deinit();
 
     const result = Cow.open(&overlay, "/nonexistent/path/file.txt", .{ .ACCMODE = .RDONLY }, 0o644);
-    try testing.expectError(error.FileNotFound, result);
+    try testing.expectError(error.NOENT, result);
 }
 
 test "open non-existent file WRONLY without CREAT fails" {
@@ -457,7 +453,7 @@ test "open non-existent file WRONLY without CREAT fails" {
     defer overlay.deinit();
 
     const result = Cow.open(&overlay, "/nonexistent/path/file.txt", .{ .ACCMODE = .WRONLY }, 0o644);
-    try testing.expectError(error.FileNotFound, result);
+    try testing.expectError(error.NOENT, result);
 }
 
 test "COW open deep path creates parent dirs in overlay" {

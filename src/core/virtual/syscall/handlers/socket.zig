@@ -1,13 +1,13 @@
 const std = @import("std");
 const linux = std.os.linux;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
 const Supervisor = @import("../../../Supervisor.zig");
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const replyErr = @import("../../../seccomp/notif.zig").replyErr;
 
-pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP.notif_resp {
+pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOMP.notif_resp {
     const logger = supervisor.logger;
     const allocator = supervisor.allocator;
 
@@ -20,35 +20,20 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
     // Create the kernel socket
     const rc = linux.socket(domain, sock_type, protocol);
-    const errno = linux.errno(rc);
-    if (errno != .SUCCESS) {
-        logger.log("socket: kernel socket failed: {s}", .{@tagName(errno)});
-        return replyErr(notif.id, errno);
-    }
+    try checkErr(rc, "socket: kernel socket failed", .{});
+
     const kernel_fd: i32 = @intCast(rc);
 
     // Wrap as passthrough File
-    const file = File.init(allocator, .{ .passthrough = .{ .fd = kernel_fd } }) catch {
-        _ = linux.close(kernel_fd);
-        logger.log("socket: failed to alloc File", .{});
-        return replyErr(notif.id, .NOMEM);
-    };
+    const file = try File.init(allocator, .{ .passthrough = .{ .fd = kernel_fd } });
+    errdefer file.unref();
 
     // Register in the caller's FdTable
     supervisor.mutex.lockUncancelable(supervisor.io);
     defer supervisor.mutex.unlock(supervisor.io);
 
-    const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-        file.unref();
-        logger.log("socket: Thread not found for tid={d}: {}", .{ caller_tid, err });
-        return replyErr(notif.id, .SRCH);
-    };
-
-    const vfd = caller.fd_table.insert(file, .{ .cloexec = cloexec }) catch {
-        file.unref();
-        logger.log("socket: failed to insert fd", .{});
-        return replyErr(notif.id, .MFILE);
-    };
+    const caller = try supervisor.guest_threads.get(caller_tid);
+    const vfd = try caller.fd_table.insert(file, .{ .cloexec = cloexec });
 
     logger.log("socket: created vfd={d}", .{vfd});
     return replySuccess(notif.id, vfd);
@@ -56,7 +41,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const LogBuffer = @import("../../../LogBuffer.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 
@@ -77,8 +61,7 @@ test "socket creates a virtual fd" {
         .arg2 = 0,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
 
     const vfd: i32 = @intCast(resp.val);
     try testing.expect(vfd >= 3);
@@ -106,8 +89,7 @@ test "socket with SOCK_CLOEXEC sets cloexec flag" {
         .arg2 = 0,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
 
     const vfd: i32 = @intCast(resp.val);
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
@@ -131,7 +113,5 @@ test "socket unknown caller returns ESRCH" {
         .arg2 = 0,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+    try testing.expectError(error.SRCH, handle(notif, &supervisor));
 }
