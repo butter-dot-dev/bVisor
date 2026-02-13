@@ -60,7 +60,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const LogBuffer = @import("../../../LogBuffer.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 const ProcFile = @import("../../fs/backend/procfile.zig").ProcFile;
@@ -85,7 +84,7 @@ test "connect unknown caller returns ESRCH" {
     });
 
     const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
 }
 
@@ -108,7 +107,7 @@ test "connect invalid vfd returns EBADF" {
     });
 
     const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
 }
 
@@ -136,7 +135,7 @@ test "connect on non-socket file returns ENOTSOCK" {
     });
 
     const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.NOTSOCK))), resp.@"error");
 }
 
@@ -157,8 +156,7 @@ test "connect UDP socket to localhost succeeds" {
         .arg1 = linux.SOCK.DGRAM,
         .arg2 = 0,
     });
-    const sock_resp = socket_handler.handle(sock_notif, &supervisor);
-    try testing.expect(!isError(sock_resp));
+    const sock_resp = try socket_handler.handle(sock_notif, &supervisor);
     const vfd: i32 = @intCast(sock_resp.val);
 
     // UDP connect just sets the default destination, always succeeds
@@ -174,7 +172,6 @@ test "connect UDP socket to localhost succeeds" {
         .arg2 = @sizeOf(linux.sockaddr.in),
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 }

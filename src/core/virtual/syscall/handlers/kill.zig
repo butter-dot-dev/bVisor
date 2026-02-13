@@ -13,7 +13,6 @@ const Threads = @import("../../proc/Threads.zig");
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const isError = @import("../../../seccomp/notif.zig").isError;
 
 // `kill` kills processes/thread groups specified by a namespaced TGID
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOMP.notif_resp {
@@ -81,7 +80,7 @@ test "kill with negative pid returns EINVAL" {
     });
 
     const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intFromEnum(linux.E.INVAL)), resp.@"error");
 }
 
@@ -101,6 +100,6 @@ test "kill with zero pid returns EINVAL" {
     });
 
     const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intFromEnum(linux.E.INVAL)), resp.@"error");
 }

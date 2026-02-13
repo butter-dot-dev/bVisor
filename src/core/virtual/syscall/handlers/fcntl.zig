@@ -72,7 +72,7 @@ fn handleDupFd(
     caller: *Thread,
     logger: Logger,
     cloexec: bool,
-) linux.SECCOMP.notif_resp {
+) !linux.SECCOMP.notif_resp {
     _ = arg;
 
     const file = caller.fd_table.get_ref(fd) orelse {
@@ -102,7 +102,7 @@ fn handleGetFd(
     fd: i32,
     caller: *Thread,
     logger: Logger,
-) linux.SECCOMP.notif_resp {
+) !linux.SECCOMP.notif_resp {
     // Verify the fd exists
     const file = caller.fd_table.get_ref(fd) orelse {
         logger.log("fcntl: F_GETFD EBADF for fd={d}", .{fd});
@@ -123,7 +123,7 @@ fn handleSetFd(
     arg: u64,
     caller: *Thread,
     logger: Logger,
-) linux.SECCOMP.notif_resp {
+) !linux.SECCOMP.notif_resp {
     const new_cloexec = (arg & linux.FD_CLOEXEC) != 0;
 
     if (!caller.fd_table.setCloexec(fd, new_cloexec)) {
@@ -141,7 +141,7 @@ fn handleGetFl(
     fd: i32,
     caller: *Thread,
     logger: Logger,
-) linux.SECCOMP.notif_resp {
+) !linux.SECCOMP.notif_resp {
     const file = caller.fd_table.get_ref(fd) orelse {
         logger.log("fcntl: F_GETFL EBADF for fd={d}", .{fd});
         return LinuxErr.BADF;
@@ -160,7 +160,7 @@ fn handleSetFl(
     arg: u64,
     caller: *Thread,
     logger: Logger,
-) linux.SECCOMP.notif_resp {
+) !linux.SECCOMP.notif_resp {
     const file = caller.fd_table.get_ref(fd) orelse {
         logger.log("fcntl: F_SETFL EBADF for fd={d}", .{fd});
         return LinuxErr.BADF;
@@ -224,8 +224,7 @@ test "F_GETFD returns 0 for non-cloexec fd" {
     file.open_flags = .{};
     const vfd = try caller.fd_table.insert(file, .{});
 
-    const resp = handle(makeFcntlNotif(100, vfd, F.GETFD, 0), &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(makeFcntlNotif(100, vfd, F.GETFD, 0), &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 }
 
@@ -246,8 +245,7 @@ test "F_GETFD returns FD_CLOEXEC for cloexec fd" {
 
     _ = caller.fd_table.setCloexec(vfd, true);
 
-    const resp = handle(makeFcntlNotif(100, vfd, F.GETFD, 0), &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(makeFcntlNotif(100, vfd, F.GETFD, 0), &supervisor);
     try testing.expectEqual(@as(i64, linux.FD_CLOEXEC), resp.val);
 }
 
@@ -266,14 +264,12 @@ test "F_SETFD sets cloexec" {
     file.open_flags = .{};
     const vfd = try caller.fd_table.insert(file, .{});
 
-    const set_resp = handle(makeFcntlNotif(100, vfd, F.SETFD, linux.FD_CLOEXEC), &supervisor);
-    try testing.expect(!isError(set_resp));
+    try handle(makeFcntlNotif(100, vfd, F.SETFD, linux.FD_CLOEXEC), &supervisor);
 
     const get_resp = handle(makeFcntlNotif(100, vfd, F.GETFD, 0), &supervisor);
     try testing.expectEqual(@as(i64, linux.FD_CLOEXEC), get_resp.val);
 
-    const clear_resp = handle(makeFcntlNotif(100, vfd, F.SETFD, 0), &supervisor);
-    try testing.expect(!isError(clear_resp));
+    try handle(makeFcntlNotif(100, vfd, F.SETFD, 0), &supervisor);
 
     const get_resp2 = handle(makeFcntlNotif(100, vfd, F.GETFD, 0), &supervisor);
     try testing.expectEqual(@as(i64, 0), get_resp2.val);
@@ -295,8 +291,7 @@ test "F_GETFL returns stored open flags" {
     file.open_flags = flags;
     const vfd = try caller.fd_table.insert(file, .{});
 
-    const resp = handle(makeFcntlNotif(100, vfd, F.GETFL, 0), &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(makeFcntlNotif(100, vfd, F.GETFL, 0), &supervisor);
 
     const returned: linux.O = @bitCast(@as(u32, @intCast(resp.val)));
     try testing.expect(returned.ACCMODE == .RDWR);
@@ -321,8 +316,7 @@ test "F_SETFL changes mutable flags but preserves ACCMODE" {
 
     // Set NONBLOCK (mutable) and try to change ACCMODE (immutable)
     const new_flags: linux.O = .{ .ACCMODE = .RDWR, .NONBLOCK = true };
-    const set_resp = handle(makeFcntlNotif(100, vfd, F.SETFL, @as(u32, @bitCast(new_flags))), &supervisor);
-    try testing.expect(!isError(set_resp));
+    try handle(makeFcntlNotif(100, vfd, F.SETFL, @as(u32, @bitCast(new_flags))), &supervisor);
 
     // Verify: NONBLOCK should be set, ACCMODE should still be RDONLY
     const get_resp = handle(makeFcntlNotif(100, vfd, F.GETFL, 0), &supervisor);
@@ -345,8 +339,7 @@ test "F_DUPFD duplicates fd" {
     const file = try File.init(testing.allocator, .{ .passthrough = .{ .fd = 42 } });
     file.open_flags = .{};
     const vfd = try caller.fd_table.insert(file, .{});
-    const resp = handle(makeFcntlNotif(100, vfd, F.DUPFD, 0), &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(makeFcntlNotif(100, vfd, F.DUPFD, 0), &supervisor);
 
     const newfd: i32 = @intCast(resp.val);
     try testing.expect(newfd != vfd);
@@ -369,8 +362,7 @@ test "F_DUPFD_CLOEXEC duplicates fd with cloexec" {
     file.open_flags = .{};
     const vfd = try caller.fd_table.insert(file, .{});
 
-    const resp = handle(makeFcntlNotif(100, vfd, F_DUPFD_CLOEXEC, 0), &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(makeFcntlNotif(100, vfd, F_DUPFD_CLOEXEC, 0), &supervisor);
 
     const newfd: i32 = @intCast(resp.val);
     try testing.expect(newfd != vfd);
@@ -388,8 +380,8 @@ test "fcntl on bad fd returns EBADF" {
     defer supervisor.deinit();
 
     const resp = handle(makeFcntlNotif(100, 999, F.GETFD, 0), &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
+    const err = if (resp) |_| return error.TestExpectedEqual else |e| e;
+    try testing.expectEqual(error.BADF, err);
 }
 
 test "fcntl on unknown caller returns ESRCH" {
@@ -402,6 +394,6 @@ test "fcntl on unknown caller returns ESRCH" {
     defer supervisor.deinit();
 
     const resp = handle(makeFcntlNotif(999, 3, F.GETFD, 0), &supervisor);
-    try testing.expect(isError(resp));
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+    const err = if (resp) |_| return error.TestExpectedEqual else |e| e;
+    try testing.expectEqual(error.SRCH, err);
 }

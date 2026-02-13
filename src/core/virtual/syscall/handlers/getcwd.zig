@@ -48,7 +48,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const LogBuffer = @import("../../../LogBuffer.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 
@@ -68,9 +67,7 @@ test "getcwd returns / for initial thread" {
         .arg0 = @intFromPtr(&buf),
         .arg1 = buf.len,
     });
-    const resp = handle(notif, &supervisor);
-
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 2), resp.val); // "/" + null = 2
     try testing.expectEqualStrings("/", std.mem.sliceTo(&buf, 0));
 }
@@ -92,8 +89,7 @@ test "getcwd returns ERANGE when buffer too small" {
         .arg1 = buf.len, // 1 byte, too small for "/" + null
     });
     const resp = handle(notif, &supervisor);
-
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.RANGE))), resp.@"error");
 }
 
@@ -115,7 +111,7 @@ test "getcwd returns ESRCH for unknown tid" {
     });
     const resp = handle(notif, &supervisor);
 
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
 }
 
@@ -139,9 +135,7 @@ test "getcwd reflects cwd change" {
         .arg0 = @intFromPtr(&buf),
         .arg1 = buf.len,
     });
-    const resp = handle(notif, &supervisor);
-
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 5), resp.val); // "/tmp" + null = 5
     try testing.expectEqualStrings("/tmp", std.mem.sliceTo(&buf, 0));
 }

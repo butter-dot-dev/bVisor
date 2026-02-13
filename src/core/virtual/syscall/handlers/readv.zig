@@ -13,7 +13,6 @@ const generateUid = @import("../../../setup.zig").generateUid;
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const isContinue = @import("../../../seccomp/notif.zig").isContinue;
 const replyContinue = @import("../../../seccomp/notif.zig").replyContinue;
 
@@ -135,8 +134,7 @@ test "readv single iovec reads data correctly" {
         .arg2 = 1,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expect(resp.val > 0);
     try testing.expectEqualStrings("100\n", result_buf[0..@intCast(resp.val)]);
 }
@@ -170,8 +168,7 @@ test "readv multiple iovecs distributes data across buffers" {
         .arg2 = 2,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 4), resp.val);
     try testing.expectEqualStrings("10", &buf1);
     try testing.expectEqualStrings("0\n", &buf2);
@@ -226,6 +223,6 @@ test "readv non-existent VFD returns EBADF" {
     });
 
     const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
 }

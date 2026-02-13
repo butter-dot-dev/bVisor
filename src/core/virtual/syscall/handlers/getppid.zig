@@ -15,7 +15,6 @@ const proc_info = @import("../../../utils/proc_info.zig");
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const isError = @import("../../../seccomp/notif.zig").isError;
 
 /// getppid return the namespaced TGID of the parent thread
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOMP.notif_resp {
@@ -60,8 +59,7 @@ test "getppid for init Thread returns 0" {
     defer supervisor.deinit();
 
     const notif = makeNotif(.getppid, .{ .pid = init_tid });
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 }
 
@@ -82,8 +80,7 @@ test "getppid for child returns parent's AbsTgid" {
 
     // Child calls getppid
     const notif = makeNotif(.getppid, .{ .pid = child_tid });
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     // Parent's AbsTgid
     try testing.expectEqual(@as(i64, init_tid), resp.val);
 }
@@ -109,9 +106,7 @@ test "getppid for grandchild returns parent's AbsTgid" {
 
     // Grandchild calls getppid
     const notif = makeNotif(.getppid, .{ .pid = grandchild_tid });
-    const resp = handle(notif, &supervisor);
-
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     // Parent's AbsTgid
     try testing.expectEqual(@as(i64, child_tid), resp.val);
 }

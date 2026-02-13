@@ -73,7 +73,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const LogBuffer = @import("../../../LogBuffer.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 const openat = @import("openat.zig");
@@ -94,8 +93,7 @@ test "fchdir with unknown tid returns ESRCH" {
         .arg0 = 3,
     });
     const resp = handle(notif, &supervisor);
-
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
 }
 
@@ -115,7 +113,7 @@ test "fchdir with invalid fd returns EBADF" {
     });
     const resp = handle(notif, &supervisor);
 
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
 }
 
@@ -140,7 +138,7 @@ test "fchdir on fd without opened_path returns ENOTDIR" {
     });
     const resp = handle(notif, &supervisor);
 
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.NOTDIR))), resp.@"error");
 }
 
@@ -163,8 +161,7 @@ test "fchdir + getcwd roundtrip via openat" {
         .arg2 = @as(u64, 0), // O_RDONLY
         .arg3 = @as(u64, 0),
     });
-    const open_resp = openat.handle(open_notif, &supervisor);
-    try testing.expect(!isError(open_resp));
+    const open_resp = try openat.handle(open_notif, &supervisor);
     const dir_fd = open_resp.val;
 
     // fchdir to that fd
@@ -172,8 +169,7 @@ test "fchdir + getcwd roundtrip via openat" {
         .pid = init_tid,
         .arg0 = @as(u64, @intCast(dir_fd)),
     });
-    const fchdir_resp = handle(fchdir_notif, &supervisor);
-    try testing.expect(!isError(fchdir_resp));
+    try handle(fchdir_notif, &supervisor);
 
     // getcwd should now return /tmp
     var buf: [256]u8 = undefined;
@@ -182,8 +178,7 @@ test "fchdir + getcwd roundtrip via openat" {
         .arg0 = @intFromPtr(&buf),
         .arg1 = buf.len,
     });
-    const getcwd_resp = getcwd.handle(getcwd_notif, &supervisor);
-    try testing.expect(!isError(getcwd_resp));
+    try getcwd.handle(getcwd_notif, &supervisor);
     try testing.expectEqualStrings("/tmp", std.mem.sliceTo(&buf, 0));
 }
 
@@ -209,7 +204,7 @@ test "fchdir on fd with blocked path returns EPERM" {
     });
     const resp = handle(notif, &supervisor);
 
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.PERM))), resp.@"error");
 }
 
@@ -241,6 +236,6 @@ test "fchdir on non-directory fd returns ENOTDIR" {
     });
     const resp = handle(notif, &supervisor);
 
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.NOTDIR))), resp.@"error");
 }

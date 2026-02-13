@@ -86,7 +86,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const LogBuffer = @import("../../../LogBuffer.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 const getcwd = @import("getcwd.zig");
@@ -106,9 +105,7 @@ test "chdir to / succeeds" {
         .pid = init_tid,
         .arg0 = @intFromPtr(@as([*:0]const u8, "/")),
     });
-    const resp = handle(notif, &supervisor);
-
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 }
 
@@ -127,8 +124,7 @@ test "chdir to blocked path returns EPERM" {
         .arg0 = @intFromPtr(@as([*:0]const u8, "/sys")),
     });
     const resp = handle(notif, &supervisor);
-
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.PERM))), resp.@"error");
 }
 
@@ -147,8 +143,7 @@ test "chdir to empty path returns ENOENT" {
         .arg0 = @intFromPtr(@as([*:0]const u8, "")),
     });
     const resp = handle(notif, &supervisor);
-
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.NOENT))), resp.@"error");
 }
 
@@ -168,7 +163,7 @@ test "chdir with unknown tid returns ESRCH" {
     });
     const resp = handle(notif, &supervisor);
 
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
 }
 
@@ -188,8 +183,7 @@ test "chdir + getcwd roundtrip" {
         .pid = init_tid,
         .arg0 = @intFromPtr(@as([*:0]const u8, "/tmp")),
     });
-    const chdir_resp = handle(chdir_notif, &supervisor);
-    try testing.expect(!isError(chdir_resp));
+    try handle(chdir_notif, &supervisor);
 
     // getcwd should now return /tmp
     var buf: [256]u8 = undefined;
@@ -198,8 +192,7 @@ test "chdir + getcwd roundtrip" {
         .arg0 = @intFromPtr(&buf),
         .arg1 = buf.len,
     });
-    const getcwd_resp = getcwd.handle(getcwd_notif, &supervisor);
-    try testing.expect(!isError(getcwd_resp));
+    try getcwd.handle(getcwd_notif, &supervisor);
     try testing.expectEqualStrings("/tmp", std.mem.sliceTo(&buf, 0));
 }
 
@@ -219,7 +212,6 @@ test "chdir relative path to blocked dir returns EPERM" {
         .arg0 = @intFromPtr(@as([*:0]const u8, "sys")),
     });
     const resp = handle(notif, &supervisor);
-
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.PERM))), resp.@"error");
 }

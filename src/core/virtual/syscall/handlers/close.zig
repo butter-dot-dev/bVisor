@@ -53,7 +53,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const isContinue = @import("../../../seccomp/notif.zig").isContinue;
 const ProcFile = @import("../../fs/backend/procfile.zig").ProcFile;
 
@@ -76,8 +75,7 @@ test "close virtual FD returns success and removes from table" {
         .arg0 = @as(u64, @bitCast(@as(i64, vfd))),
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 
     // VFD should be gone
@@ -118,7 +116,7 @@ test "after close, read same VFD returns EBADF" {
     });
 
     const resp = read_handler.handle(read_notif, &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
 }
 
@@ -179,7 +177,7 @@ test "close non-existent VFD returns EBADF" {
 
     const notif = makeNotif(.close, .{ .pid = init_tid, .arg0 = 99 });
     const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
 }
 
@@ -203,12 +201,10 @@ test "double close - first succeeds, second EBADF" {
     });
 
     // First close succeeds
-    const resp1 = handle(notif, &supervisor);
-    try testing.expect(!isError(resp1));
+    try handle(notif, &supervisor);
 
     // Second close returns EBADF
-    const resp2 = handle(notif, &supervisor);
-    try testing.expect(isError(resp2));
+    const resp2 = try handle(notif, &supervisor);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp2.@"error");
 }
 
@@ -224,6 +220,6 @@ test "close with unknown caller PID returns ESRCH" {
 
     const notif = makeNotif(.close, .{ .pid = 999, .arg0 = 3 });
     const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
 }

@@ -127,7 +127,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const LogBuffer = @import("../../../LogBuffer.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 
@@ -151,7 +150,7 @@ test "faccessat blocked path returns EACCES" {
     defer supervisor.deinit();
 
     const resp = handle(makeAccessatNotif(init_tid, "/sys/class/net", 0), &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.ACCES))), resp.@"error");
 }
 
@@ -165,8 +164,7 @@ test "faccessat /proc/self returns success" {
     var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
-    const resp = handle(makeAccessatNotif(init_tid, "/proc/self", 0), &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(makeAccessatNotif(init_tid, "/proc/self", 0), &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 }
 
@@ -181,8 +179,7 @@ test "faccessat relative path resolves against cwd" {
     defer supervisor.deinit();
 
     // cwd is "/" so "proc/self" resolves to "/proc/self" (same as the absolute path test)
-    const resp = handle(makeAccessatNotif(init_tid, "proc/self", 0), &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(makeAccessatNotif(init_tid, "proc/self", 0), &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 }
 
@@ -197,7 +194,7 @@ test "faccessat unknown caller returns ESRCH" {
     defer supervisor.deinit();
 
     const resp = handle(makeAccessatNotif(999, "/proc/self", 0), &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
 }
 
@@ -212,6 +209,6 @@ test "faccessat /proc/999 non-existent returns ENOENT" {
     defer supervisor.deinit();
 
     const resp = handle(makeAccessatNotif(init_tid, "/proc/999", 0), &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.NOENT))), resp.@"error");
 }

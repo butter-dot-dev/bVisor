@@ -12,7 +12,6 @@ const generateUid = @import("../../../setup.zig").generateUid;
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const isContinue = @import("../../../seccomp/notif.zig").isContinue;
 const replyContinue = @import("../../../seccomp/notif.zig").replyContinue;
 
@@ -106,8 +105,7 @@ test "read from virtual file returns data" {
         .arg2 = result_buf.len,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expect(resp.val > 0);
     try testing.expectEqualStrings("100\n", result_buf[0..@intCast(resp.val)]);
 }
@@ -134,8 +132,7 @@ test "read count=5 from larger file returns at most 5 bytes" {
         .arg2 = 5,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expect(resp.val <= 5);
 }
 
@@ -183,8 +180,7 @@ test "read count=0 returns 0" {
         .arg2 = 0,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 }
 
@@ -207,7 +203,7 @@ test "read from non-existent VFD returns EBADF" {
     });
 
     const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
 }
 
@@ -230,6 +226,6 @@ test "read with unknown caller PID returns ESRCH" {
     });
 
     const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
 }

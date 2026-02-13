@@ -164,7 +164,6 @@ fn writeStatResponse(notif: linux.SECCOMP.notif, statx_buf: linux.Statx, statbuf
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const LogBuffer = @import("../../../LogBuffer.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 const Stat = @import("../../../types.zig").Stat;
@@ -187,9 +186,7 @@ test "fstatat64 path-based /proc/self succeeds" {
         .arg2 = @intFromPtr(&stat_result),
         .arg3 = @as(u64, 0),
     });
-    const resp = handle(notif, &supervisor);
-
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 }
 
@@ -213,7 +210,7 @@ test "fstatat64 blocked path /sys returns EPERM" {
     });
     const resp = handle(notif, &supervisor);
 
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.PERM))), resp.@"error");
 }
 
@@ -237,7 +234,7 @@ test "fstatat64 empty path without AT_EMPTY_PATH returns EINVAL" {
     });
     const resp = handle(notif, &supervisor);
 
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.INVAL))), resp.@"error");
 }
 
@@ -261,7 +258,7 @@ test "fstatat64 unknown tid returns ESRCH" {
     });
     const resp = handle(notif, &supervisor);
 
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
 }
 
@@ -294,9 +291,7 @@ test "fstatat64 AT_EMPTY_PATH with proc fd succeeds" {
         .arg2 = @intFromPtr(&stat_result),
         .arg3 = AT_EMPTY_PATH,
     });
-    const resp = handle(notif, &supervisor);
-
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
     // ProcFile statx returns S_IFREG | 0o444
     try testing.expect(stat_result.st_mode & linux.S.IFMT == linux.S.IFREG);

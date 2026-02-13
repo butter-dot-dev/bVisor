@@ -121,7 +121,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const isContinue = @import("../../../seccomp/notif.zig").isContinue;
 const FdTable = @import("../../fs/FdTable.zig");
 const Tmp = @import("../../fs/backend/tmp.zig").Tmp;
@@ -153,8 +152,7 @@ test "writev single iovec writes data" {
         .arg2 = 1,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 5), resp.val);
 }
 
@@ -189,8 +187,7 @@ test "writev multiple iovecs concatenated write" {
         .arg2 = 3,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 11), resp.val);
 }
 
@@ -218,8 +215,7 @@ test "writev FD 1 (stdout) captures into log buffer" {
         .arg2 = 1,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 5), resp.val);
 }
 
@@ -247,8 +243,7 @@ test "writev FD 2 (stderr) captures into log buffer" {
         .arg2 = 1,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 5), resp.val);
 }
 
@@ -271,26 +266,24 @@ test "writev stdout: write, write, drain, write, drain" {
         .{ .base = d1a.ptr, .len = d1a.len },
         .{ .base = d1b.ptr, .len = d1b.len },
     };
-    const r1 = handle(makeNotif(.writev, .{
+    try handle(makeNotif(.writev, .{
         .pid = init_tid,
         .arg0 = 1,
         .arg1 = @intFromPtr(&iovecs1),
         .arg2 = 2,
     }), &supervisor);
-    try testing.expect(!isError(r1));
 
     // writev "world"
     const d2 = "world";
     var iovecs2 = [_]iovec_const{
         .{ .base = d2.ptr, .len = d2.len },
     };
-    const r2 = handle(makeNotif(.writev, .{
+    try handle(makeNotif(.writev, .{
         .pid = init_tid,
         .arg0 = 1,
         .arg1 = @intFromPtr(&iovecs2),
         .arg2 = 1,
     }), &supervisor);
-    try testing.expect(!isError(r2));
 
     // drain — should see "hel" + "lo " + "world"
     const drain1 = try supervisor.stdout.read(allocator, io);
@@ -302,13 +295,12 @@ test "writev stdout: write, write, drain, write, drain" {
     var iovecs3 = [_]iovec_const{
         .{ .base = d3.ptr, .len = d3.len },
     };
-    const r3 = handle(makeNotif(.writev, .{
+    try handle(makeNotif(.writev, .{
         .pid = init_tid,
         .arg0 = 1,
         .arg1 = @intFromPtr(&iovecs3),
         .arg2 = 1,
     }), &supervisor);
-    try testing.expect(!isError(r3));
 
     // drain — should see only "!"
     const drain2 = try supervisor.stdout.read(allocator, io);
@@ -340,6 +332,6 @@ test "writev non-existent VFD returns EBADF" {
     });
 
     const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
 }

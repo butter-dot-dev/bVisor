@@ -84,7 +84,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const LogBuffer = @import("../../../LogBuffer.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 
@@ -108,8 +107,7 @@ test "socketpair creates two virtual fds and writes them back" {
         .arg3 = @intFromPtr(&sv),
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 
     // Both vfds should be >= 3
@@ -148,8 +146,7 @@ test "socketpair with SOCK_CLOEXEC sets cloexec flag" {
         .arg3 = @intFromPtr(&sv),
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    try handle(notif, &supervisor);
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
     try testing.expect(caller.fd_table.getCloexec(sv[0]));
@@ -177,6 +174,6 @@ test "socketpair unknown caller returns ESRCH" {
     });
 
     const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
 }

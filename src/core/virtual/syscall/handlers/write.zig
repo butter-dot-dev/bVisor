@@ -11,7 +11,6 @@ const generateUid = @import("../../../setup.zig").generateUid;
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const isContinue = @import("../../../seccomp/notif.zig").isContinue;
 const replyContinue = @import("../../../seccomp/notif.zig").replyContinue;
 
@@ -112,8 +111,7 @@ test "write to FD 1 (stdout) captures into log buffer" {
         .arg2 = data.len,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 5), resp.val);
 }
 
@@ -137,8 +135,7 @@ test "write to FD 2 (stderr) captures into log buffer" {
         .arg2 = data.len,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 5), resp.val);
 }
 
@@ -156,23 +153,21 @@ test "write stdout: write, write, drain, write, drain" {
 
     // write "aaa"
     var d1 = "aaa".*;
-    const r1 = handle(makeNotif(.write, .{
+    try handle(makeNotif(.write, .{
         .pid = init_tid,
         .arg0 = 1,
         .arg1 = @intFromPtr(&d1),
         .arg2 = d1.len,
     }), &supervisor);
-    try testing.expect(!isError(r1));
 
     // write "bbb"
     var d2 = "bbb".*;
-    const r2 = handle(makeNotif(.write, .{
+    try handle(makeNotif(.write, .{
         .pid = init_tid,
         .arg0 = 1,
         .arg1 = @intFromPtr(&d2),
         .arg2 = d2.len,
     }), &supervisor);
-    try testing.expect(!isError(r2));
 
     // drain — should see "aaabbb"
     const drain1 = try supervisor.stdout.read(allocator, io);
@@ -181,13 +176,12 @@ test "write stdout: write, write, drain, write, drain" {
 
     // write "ccc"
     var d3 = "ccc".*;
-    const r3 = handle(makeNotif(.write, .{
+    try handle(makeNotif(.write, .{
         .pid = init_tid,
         .arg0 = 1,
         .arg1 = @intFromPtr(&d3),
         .arg2 = d3.len,
     }), &supervisor);
-    try testing.expect(!isError(r3));
 
     // drain — should see only "ccc"
     const drain2 = try supervisor.stdout.read(allocator, io);
@@ -219,8 +213,7 @@ test "write count=0 returns 0" {
         .arg2 = 0,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 }
 
@@ -244,7 +237,7 @@ test "write to non-existent VFD returns EBADF" {
     });
 
     const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
 }
 
@@ -268,7 +261,7 @@ test "write with unknown caller PID returns ESRCH" {
     });
 
     const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
 }
 
@@ -296,6 +289,6 @@ test "write to read-only backend (proc) returns EIO" {
     });
 
     const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.IO))), resp.@"error");
 }

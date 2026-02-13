@@ -47,7 +47,6 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const LogBuffer = @import("../../../LogBuffer.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 const memory_bridge = @import("../../../utils/memory_bridge.zig");
@@ -70,7 +69,7 @@ test "shutdown unknown caller returns ESRCH" {
     });
 
     const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
 }
 
@@ -91,7 +90,7 @@ test "shutdown invalid vfd returns EBADF" {
     });
 
     const resp = handle(notif, &supervisor);
-    try testing.expect(isError(resp));
+    try testing.expect(if (resp) |_| false else |_| true);
     try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
 }
 
@@ -114,8 +113,7 @@ test "shutdown on socketpair succeeds" {
         .arg2 = 0,
         .arg3 = @intFromPtr(&sv),
     });
-    const sp_resp = socketpair_handler.handle(sp_notif, &supervisor);
-    try testing.expect(!isError(sp_resp));
+    try socketpair_handler.handle(sp_notif, &supervisor);
 
     // Shutdown one end for writing
     const notif = makeNotif(.shutdown, .{
@@ -124,7 +122,6 @@ test "shutdown on socketpair succeeds" {
         .arg1 = linux.SHUT.WR,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(!isError(resp));
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(@as(i64, 0), resp.val);
 }
