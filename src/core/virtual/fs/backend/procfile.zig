@@ -171,6 +171,11 @@ pub const ProcFile = struct {
         return new_offset;
     }
 
+    pub fn ioctl(self: *ProcFile, request: linux.IOCTL.Request, arg: usize) !usize {
+        _ = .{ self, request, arg };
+        return error.NOTTY;
+    }
+
     pub fn connect(self: *ProcFile, addr: [*]const u8, addrlen: linux.socklen_t) !void {
         _ = .{ self, addr, addrlen };
         return error.NOTSOCK;

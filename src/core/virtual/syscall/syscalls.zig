@@ -37,6 +37,7 @@ const socket = @import("handlers/socket.zig");
 const socketpair = @import("handlers/socketpair.zig");
 const connect = @import("handlers/connect.zig");
 const shutdown = @import("handlers/shutdown.zig");
+const ioctl = @import("handlers/ioctl.zig");
 const recvfrom = @import("handlers/recvfrom.zig");
 const sendto = @import("handlers/sendto.zig");
 const sendmsg = @import("handlers/sendmsg.zig");
@@ -70,6 +71,7 @@ pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux
         .socketpair => socketpair.handle(notif, supervisor),
         .connect => connect.handle(notif, supervisor),
         .shutdown => shutdown.handle(notif, supervisor),
+        .ioctl => ioctl.handle(notif, supervisor),
         .recvfrom => recvfrom.handle(notif, supervisor),
         .sendto => sendto.handle(notif, supervisor),
         .sendmsg => sendmsg.handle(notif, supervisor),
@@ -90,7 +92,6 @@ pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux
         .waitid => replyContinue(notif.id),
 
         // To implement - files
-        .ioctl,
         .getdents64,
         // To implement - process
         .set_tid_address,

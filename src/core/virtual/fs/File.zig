@@ -183,6 +183,12 @@ pub fn lseek(self: *Self, offset: i64, whence: u32) !i64 {
     }
 }
 
+pub fn ioctl(self: *Self, request: linux.IOCTL.Request, arg: usize) !usize {
+    switch (self.backend) {
+        inline else => |*f| return f.ioctl(request, arg),
+    }
+}
+
 pub fn connect(self: *Self, addr: [*]const u8, addrlen: linux.socklen_t) !void {
     switch (self.backend) {
         inline else => |*f| return f.connect(addr, addrlen),

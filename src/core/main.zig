@@ -49,6 +49,7 @@ test {
     _ = @import("virtual/syscall/handlers/socketpair.zig");
     _ = @import("virtual/syscall/handlers/connect.zig");
     _ = @import("virtual/syscall/handlers/shutdown.zig");
+    _ = @import("virtual/syscall/handlers/ioctl.zig");
     _ = @import("virtual/syscall/handlers/recvfrom.zig");
     _ = @import("virtual/syscall/handlers/sendto.zig");
     _ = @import("virtual/syscall/handlers/sendmsg.zig");

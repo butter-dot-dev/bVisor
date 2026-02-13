@@ -129,6 +129,15 @@ pub const Cow = union(enum) {
         return @intCast(rc);
     }
 
+    pub fn ioctl(self: *Cow, request: linux.IOCTL.Request, arg: usize) !usize {
+        const fd = switch (self.*) {
+            inline else => |fd| fd,
+        };
+        const rc = linux.ioctl(fd, @bitCast(request), arg);
+        try checkErr(rc, "cow.ioctl", .{});
+        return rc;
+    }
+
     pub fn connect(self: *Cow, addr: [*]const u8, addrlen: linux.socklen_t) !void {
         _ = .{ self, addr, addrlen };
         return error.NOTSOCK;

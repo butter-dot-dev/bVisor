@@ -87,6 +87,12 @@ pub const Passthrough = struct {
         return @intCast(rc);
     }
 
+    pub fn ioctl(self: *Passthrough, request: linux.IOCTL.Request, arg: usize) !usize {
+        const rc = linux.ioctl(self.fd, @bitCast(request), arg);
+        try checkErr(rc, "passthrough.ioctl", .{});
+        return rc;
+    }
+
     pub fn connect(self: *Passthrough, addr: [*]const u8, addrlen: linux.socklen_t) !void {
         const rc = linux.connect(self.fd, @ptrCast(addr), addrlen);
         try checkErr(rc, "passthrough.connect", .{});

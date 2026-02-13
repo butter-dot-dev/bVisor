@@ -52,7 +52,7 @@ pub fn replyErr(id: u64, err: linux.E) linux.SECCOMP.notif_resp {
     return .{
         .id = id,
         .flags = 0,
-        .val = 0,
+        .val = -1,
         .@"error" = -@as(i32, @intCast(@intFromEnum(err))),
     };
 }

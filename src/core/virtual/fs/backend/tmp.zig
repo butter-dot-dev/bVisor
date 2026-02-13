@@ -91,6 +91,12 @@ pub const Tmp = struct {
         return @intCast(rc);
     }
 
+    pub fn ioctl(self: *Tmp, request: linux.IOCTL.Request, arg: usize) !usize {
+        const rc = linux.ioctl(self.fd, @bitCast(request), arg);
+        try checkErr(rc, "tmp.ioctl", .{});
+        return rc;
+    }
+
     pub fn connect(self: *Tmp, addr: [*]const u8, addrlen: linux.socklen_t) !void {
         _ = .{ self, addr, addrlen };
         return error.NOTSOCK;
