@@ -1083,3 +1083,55 @@ test "multiple sends -> single large recvfrom" {
     _ = close_handler(makeCloseNotif(init_tid, sv[0]), &supervisor);
     _ = close_handler(makeCloseNotif(init_tid, sv[1]), &supervisor);
 }
+
+test "recvfrom writes back source address length" {
+    const allocator = testing.allocator;
+    const init_tid: AbsTid = 100;
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
+    defer supervisor.deinit();
+
+    // socketpair(AF_UNIX, SOCK_STREAM)
+    var sv: [2]i32 = .{ -1, -1 };
+    const sp_resp = socketpair_handler(
+        makeSocketpairNotif(init_tid, linux.AF.UNIX, linux.SOCK.STREAM, 0, @intFromPtr(&sv)),
+        &supervisor,
+    );
+    try testing.expect(!isError(sp_resp));
+
+    // sendto sv[0]
+    var send_data = "addr test".*;
+    const send_resp = sendto_handler(
+        makeSendtoNotif(init_tid, sv[0], @intFromPtr(&send_data), send_data.len, 0),
+        &supervisor,
+    );
+    try testing.expect(!isError(send_resp));
+
+    // recvfrom sv[1] with src_addr and addrlen pointers
+    var recv_buf: [64]u8 = undefined;
+    var src_addr: [128]u8 = undefined;
+    var addrlen: linux.socklen_t = @sizeOf(@TypeOf(src_addr));
+    const notif = makeNotif(.recvfrom, .{
+        .pid = init_tid,
+        .arg0 = @as(u64, @bitCast(@as(i64, sv[1]))),
+        .arg1 = @intFromPtr(&recv_buf),
+        .arg2 = recv_buf.len,
+        .arg3 = 0,
+        .arg4 = @intFromPtr(&src_addr),
+        .arg5 = @intFromPtr(&addrlen),
+    });
+    const recv_resp = recvfrom_handler(notif, &supervisor);
+    try testing.expect(!isError(recv_resp));
+    try testing.expectEqualStrings("addr test", recv_buf[0..@intCast(recv_resp.val)]);
+
+    // addrlen should have been written back by the handler
+    // For AF_UNIX SOCK_STREAM socketpair, the kernel writes back the actual address length
+    try testing.expect(addrlen <= @sizeOf(@TypeOf(src_addr)));
+
+    // close both
+    _ = close_handler(makeCloseNotif(init_tid, sv[0]), &supervisor);
+    _ = close_handler(makeCloseNotif(init_tid, sv[1]), &supervisor);
+}

@@ -195,9 +195,9 @@ pub fn shutdown(self: *Self, how: i32) !void {
     }
 }
 
-pub fn recvFrom(self: *Self, buf: []u8, flags: u32) !usize {
+pub fn recvFrom(self: *Self, buf: []u8, flags: u32, src_addr: ?[*]u8, src_addrlen: ?*linux.socklen_t) !usize {
     switch (self.backend) {
-        inline else => |*f| return f.recvFrom(buf, flags),
+        inline else => |*f| return f.recvFrom(buf, flags, src_addr, src_addrlen),
     }
 }
 

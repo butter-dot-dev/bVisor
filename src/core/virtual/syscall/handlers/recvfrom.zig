@@ -17,6 +17,8 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     const buf_addr: u64 = notif.data.arg1;
     const count: usize = @truncate(notif.data.arg2);
     const flags: u32 = @truncate(notif.data.arg3);
+    const src_addr_ptr: u64 = notif.data.arg4;
+    const addrlen_ptr: u64 = notif.data.arg5;
 
     // Critical section: File lookup
     var file: *File = undefined;
@@ -36,13 +38,22 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     }
     defer file.unref();
 
-    // Receive into supervisor-local buffer
+    // Receive into supervisor-local buffer, with optional source address
     const max_len = 4096;
     var max_buf: [max_len]u8 = undefined;
     const max_count = @min(count, max_len);
     const recv_buf: []u8 = max_buf[0..max_count];
 
-    const n = file.recvFrom(recv_buf, flags) catch |err| {
+    var addr_buf: [128]u8 align(@alignOf(linux.sockaddr)) = undefined;
+    var src_addrlen: linux.socklen_t = @sizeOf(@TypeOf(addr_buf));
+    const wants_addr = src_addr_ptr != 0 and addrlen_ptr != 0;
+
+    const n = file.recvFrom(
+        recv_buf,
+        flags,
+        if (wants_addr) &addr_buf else null,
+        if (wants_addr) &src_addrlen else null,
+    ) catch |err| {
         return switch (err) {
             error.NotASocket => replyErr(notif.id, .NOTSOCK),
             else => replyErr(notif.id, .IO),
@@ -52,6 +63,24 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
     // Write received data to child memory
     if (n > 0) {
         memory_bridge.writeSlice(recv_buf[0..n], caller_tid, buf_addr) catch {
+            return replyErr(notif.id, .FAULT);
+        };
+    }
+
+    // Write source address back to guest memory
+    if (wants_addr) {
+        if (src_addrlen > 0) {
+            const guest_addrlen = memory_bridge.read(linux.socklen_t, caller_tid, addrlen_ptr) catch {
+                return replyErr(notif.id, .FAULT);
+            };
+            const copy_len = @min(src_addrlen, guest_addrlen);
+            if (copy_len > 0) {
+                memory_bridge.writeSlice(addr_buf[0..copy_len], caller_tid, src_addr_ptr) catch {
+                    return replyErr(notif.id, .FAULT);
+                };
+            }
+        }
+        memory_bridge.write(linux.socklen_t, caller_tid, src_addrlen, addrlen_ptr) catch {
             return replyErr(notif.id, .FAULT);
         };
     }

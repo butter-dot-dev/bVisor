@@ -59,13 +59,22 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         total_requested += iovecs[i].len;
     }
 
-    // Receive into supervisor-local buffer
+    // Receive into supervisor-local buffer, with optional source address
     const max_len = 4096;
     var max_buf: [max_len]u8 = undefined;
     const max_count = @min(total_requested, max_len);
     const recv_buf: []u8 = max_buf[0..max_count];
 
-    const n = file.recvFrom(recv_buf, flags) catch |err| {
+    var addr_buf: [128]u8 align(@alignOf(linux.sockaddr)) = undefined;
+    var src_addrlen: linux.socklen_t = @sizeOf(@TypeOf(addr_buf));
+    const wants_addr = msg.name != null;
+
+    const n = file.recvFrom(
+        recv_buf,
+        flags,
+        if (wants_addr) &addr_buf else null,
+        if (wants_addr) &src_addrlen else null,
+    ) catch |err| {
         return switch (err) {
             error.NotASocket => replyErr(notif.id, .NOTSOCK),
             else => replyErr(notif.id, .IO),
@@ -90,8 +99,18 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) linux.SECCOMP
         }
     }
 
-    // Write back updated msghdr: clear name/control/flags since we don't populate them
-    msg.namelen = 0;
+    // Write source address into guest's name buffer
+    if (wants_addr and src_addrlen > 0) {
+        const copy_len = @min(src_addrlen, msg.namelen);
+        if (copy_len > 0) {
+            memory_bridge.writeSlice(addr_buf[0..copy_len], caller_tid, @intFromPtr(msg.name.?)) catch {
+                return replyErr(notif.id, .FAULT);
+            };
+        }
+    }
+
+    // Write back updated msghdr
+    msg.namelen = if (wants_addr) src_addrlen else 0;
     msg.controllen = 0;
     msg.flags = 0;
     memory_bridge.write(linux.msghdr, caller_tid, msg, msg_ptr) catch {

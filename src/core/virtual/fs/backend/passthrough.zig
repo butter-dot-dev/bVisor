@@ -101,8 +101,9 @@ pub const Passthrough = struct {
         if (linux.errno(rc) != .SUCCESS) return error.SyscallFailed;
     }
 
-    pub fn recvFrom(self: *Passthrough, buf: []u8, flags: u32) !usize {
-        const rc = linux.recvfrom(self.fd, buf.ptr, buf.len, flags, null, null);
+    pub fn recvFrom(self: *Passthrough, buf: []u8, flags: u32, src_addr: ?[*]u8, src_addrlen: ?*linux.socklen_t) !usize {
+        const addr: ?*linux.sockaddr = if (src_addr) |a| @ptrCast(@alignCast(a)) else null;
+        const rc = linux.recvfrom(self.fd, buf.ptr, buf.len, flags, addr, src_addrlen);
         if (linux.errno(rc) != .SUCCESS) return error.SyscallFailed;
         return rc;
     }

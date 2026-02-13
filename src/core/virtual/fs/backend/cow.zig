@@ -143,8 +143,8 @@ pub const Cow = union(enum) {
         return error.NotASocket;
     }
 
-    pub fn recvFrom(self: *Cow, buf: []u8, flags: u32) !usize {
-        _ = .{ self, buf, flags };
+    pub fn recvFrom(self: *Cow, buf: []u8, flags: u32, src_addr: ?[*]u8, src_addrlen: ?*linux.socklen_t) !usize {
+        _ = .{ self, buf, flags, src_addr, src_addrlen };
         return error.NotASocket;
     }
 
