@@ -181,6 +181,7 @@ pub fn checkErr(return_code: usize, comptime format: []const u8, args: anytype) 
 
 /// Map any LinuxErr into the corresponding entry in linux.E
 fn strictToLinuxE(err: anyerror) anyerror!linux.E {
+    @setEvalBranchQuota(100_000);
     inline for (@typeInfo(linux.E).@"enum".fields) |field| {
         if (std.mem.eql(u8, @errorName(err), field.name))
             return @enumFromInt(field.value);
@@ -188,10 +189,51 @@ fn strictToLinuxE(err: anyerror) anyerror!linux.E {
     return err;
 }
 
-// Coerces any error to some LinuxErr
-pub fn toLinuxE(err: anyerror) linux.E {
-    return strictToLinuxE(err) catch |e| switch (e) {
-        // e.g., error.SyscallFailed => ...,
-        else => .NOSYS, // TODO: handle specific non-LinuxErr errors
-    };
+/// Map a handler error set to the corresponding linux.E
+/// Takes anytype so the compiler sees the concrete error set — any non-LinuxErr
+/// error produces a @compileError instead of silently falling through
+pub fn toLinuxE(err: anytype) linux.E {
+    @setEvalBranchQuota(10_000);
+    switch (err) {
+        // Zig-origin errors that don't match linux.E names
+        error.OutOfMemory => return .NOMEM,
+        error.SystemResources => return .NOMEM,
+        error.ProcessFdQuotaExceeded => return .MFILE,
+        error.SystemFdQuotaExceeded => return .NFILE,
+        error.AccessDenied => return .ACCES,
+        error.PermissionDenied => return .PERM,
+        error.FileNotFound => return .NOENT,
+        error.IsDir => return .ISDIR,
+        error.NotDir => return .NOTDIR,
+        error.PathAlreadyExists => return .EXIST,
+        error.InvalidPath => return .INVAL,
+        error.BadPathName => return .INVAL,
+        error.NameTooLong => return .NAMETOOLONG,
+        error.SymLinkLoop => return .LOOP,
+        error.NoDevice => return .NODEV,
+        error.NoSpaceLeft => return .NOSPC,
+        error.DiskQuota => return .DQUOT,
+        error.FileTooBig => return .FBIG,
+        error.FileBusy => return .BUSY,
+        error.DeviceBusy => return .BUSY,
+        error.PipeBusy => return .BUSY,
+        error.ReadOnlyFileSystem => return .ROFS,
+        error.LinkQuotaExceeded => return .MLINK,
+        error.WouldBlock => return .AGAIN,
+        error.WriteFailed => return .IO,
+        error.Streaming => return .IO,
+        error.InsufficientBufferLength => return .FAULT,
+        error.Canceled => return .CANCELED,
+        error.NetworkNotFound => return .NONET,
+        error.LeaderNotFound => return .SRCH,
+        error.AntivirusInterference => return .ACCES,
+        error.FileLocksUnsupported => return .NOSYS,
+        error.Unexpected => return .NOSYS,
+        // LinuxErr — delegate to strictToLinuxE's name-matching
+        inline else => |e| {
+            const result = comptime strictToLinuxE(e);
+            if (result) |linux_e| return linux_e else |_|
+                @compileError("non-LinuxErr error reaches Supervisor: error." ++ @errorName(e));
+        },
+    }
 }

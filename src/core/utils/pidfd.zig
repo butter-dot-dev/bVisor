@@ -25,14 +25,14 @@ pub inline fn lookupGuestFdWithRetry(child_pid: linux.pid_t, local_fd: linux.fd_
     var attempts: u32 = 0;
     while (attempts < 100) : (attempts += 1) {
         const result = linux.pidfd_getfd(child_fd_table, local_fd, 0);
-        checkErr(result, "pidfd_getfd retry", .{}) catch |err| switch (err) {
-            error.BADF => {
+        checkErr(result, "pidfd_getfd", .{}) catch |err| {
+            if (err == error.BADF) {
                 // FD doesn't exist yet in child - retry
                 // ERIK TODO: why 1ms? why not exponential backoff? polling also seems gross
                 try io.sleep(std.Io.Duration.fromMilliseconds(1), .awake);
                 continue;
-            },
-            else => return err,
+            }
+            return err;
         };
         return @intCast(result);
     }

@@ -25,10 +25,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
     defer supervisor.mutex.unlock(supervisor.io);
 
     // Get caller Thread
-    const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-        logger.log("fcntl: Thread not found with tid={d}: {}", .{ caller_tid, err });
-        return LinuxErr.SRCH;
-    };
+    const caller = try supervisor.guest_threads.get(caller_tid);
 
     return switch (cmd) {
         F.DUPFD => handleDupFd(notif.id, fd, arg, caller, logger, false),
@@ -81,10 +78,7 @@ fn handleDupFd(
     };
     defer file.unref();
 
-    const newfd = caller.fd_table.dup(file) catch {
-        logger.log("fcntl: F_DUPFD failed to allocate new fd", .{});
-        return LinuxErr.NOMEM;
-    };
+    const newfd = try caller.fd_table.dup(file);
 
     // CLOEXEC defaults to false
     if (cloexec) {

@@ -26,7 +26,7 @@ pub inline fn read(T: type, child_pid: linux.pid_t, child_addr: u64) !T {
 
     try checkErr(
         linux.process_vm_readv(child_pid, &local_iovec, &child_iovec, 0),
-        "", .{},
+        "memory_bridge", .{},
     );
     return local_T;
 }
@@ -50,7 +50,7 @@ pub inline fn readSlice(dest: []u8, child_pid: linux.pid_t, child_addr: u64) !vo
 
     try checkErr(
         linux.process_vm_readv(child_pid, &local_iovec, &child_iovec, 0),
-        "", .{},
+        "memory_bridge", .{},
     );
 }
 
@@ -83,7 +83,7 @@ pub inline fn write(T: type, child_pid: linux.pid_t, val: T, child_addr: u64) !v
 
     try checkErr(
         linux.process_vm_writev(child_pid, &local_iovec, &child_iovec, 0),
-        "", .{},
+        "memory_bridge", .{},
     );
 }
 
@@ -106,7 +106,7 @@ pub inline fn writeSlice(src: []const u8, child_pid: linux.pid_t, child_addr: u6
 
     try checkErr(
         linux.process_vm_writev(child_pid, &local_iovec, &child_iovec, 0),
-        "", .{},
+        "memory_bridge", .{},
     );
 }
 

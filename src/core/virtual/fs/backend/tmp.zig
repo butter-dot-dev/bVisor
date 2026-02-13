@@ -7,7 +7,7 @@ const builtin = @import("builtin");
 
 fn sysOpenat(path: []const u8, flags: linux.O, mode: linux.mode_t) !linux.fd_t {
     var path_buf: [513]u8 = undefined;
-    if (path.len > 512) return error.NameTooLong;
+    if (path.len > 512) return error.NAMETOOLONG;
     @memcpy(path_buf[0..path.len], path);
     path_buf[path.len] = 0;
     const rc = linux.openat(linux.AT.FDCWD, path_buf[0..path.len :0], flags, mode);
@@ -65,7 +65,7 @@ pub const Tmp = struct {
     }
 
     pub fn statxByPath(overlay: *OverlayRoot, path: []const u8) !linux.Statx {
-        if (comptime builtin.os.tag != .linux) return error.StatxFail;
+        if (comptime builtin.os.tag != .linux) return error.NOSYS;
 
         var resolve_buf: [512]u8 = undefined;
         const resolved = try overlay.resolveTmp(path, &resolve_buf);
@@ -93,12 +93,12 @@ pub const Tmp = struct {
 
     pub fn connect(self: *Tmp, addr: [*]const u8, addrlen: linux.socklen_t) !void {
         _ = .{ self, addr, addrlen };
-        return error.NotASocket;
+        return error.NOTSOCK;
     }
 
     pub fn shutdown(self: *Tmp, how: i32) !void {
         _ = .{ self, how };
-        return error.NotASocket;
+        return error.NOTSOCK;
     }
 };
 

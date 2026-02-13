@@ -1,7 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
 const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
-const checkErr = @import("../../../linux_error.zig").checkErr;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
@@ -29,10 +28,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
         supervisor.mutex.lockUncancelable(supervisor.io);
         defer supervisor.mutex.unlock(supervisor.io);
 
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            logger.log("connect: Thread not found for tid={d}: {}", .{ caller_tid, err });
-            return LinuxErr.SRCH;
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
 
         file = caller.fd_table.get_ref(fd) orelse {
             logger.log("connect: EBADF for fd={d}", .{fd});
@@ -43,16 +39,9 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
     // Read sockaddr from guest memory
     var addr_buf: [128]u8 = undefined;
-    memory_bridge.readSlice(addr_buf[0..addrlen], caller_tid, addr_ptr) catch {
-        return LinuxErr.FAULT;
-    };
+    try memory_bridge.readSlice(addr_buf[0..addrlen], caller_tid, addr_ptr);
 
-    file.connect(&addr_buf, addrlen) catch |err| {
-        return switch (err) {
-            error.NotASocket => LinuxErr.NOTSOCK,
-            else => LinuxErr.IO,
-        };
-    };
+    try file.connect(&addr_buf, addrlen);
 
     logger.log("connect: fd={d} success", .{fd});
     return replySuccess(notif.id, 0);

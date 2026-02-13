@@ -1,7 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
 const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
-const checkErr = @import("../../../linux_error.zig").checkErr;
 const Supervisor = @import("../../../Supervisor.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
@@ -32,10 +31,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
         defer supervisor.mutex.unlock(supervisor.io);
 
         // Get caller Thread
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            std.log.err("fstat: Thread not found with tid={d}: {}", .{ caller_tid, err });
-            return replyContinue(notif.id);
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
         std.debug.assert(caller.tid == caller_tid);
 
         file = caller.fd_table.get_ref(fd) orelse {
@@ -46,16 +42,11 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
     defer file.unref();
 
     // Get stat based on the backend type
-    const statx_buf = file.statx() catch |err| {
-        logger.log("fstat: Unable to produce stat for fd={d}: {}", .{ fd, err });
-        return LinuxErr.IO;
-    };
+    const statx_buf = try file.statx();
 
     // Convert from internal Statx to the struct stat ABI expected by fstat(2)
     const stat_buf = statxToStat(statx_buf);
     const stat_bytes = std.mem.asBytes(&stat_buf);
-    memory_bridge.writeSlice(stat_bytes, @intCast(notif.pid), statbuf_addr) catch {
-        return LinuxErr.FAULT;
-    };
+    try memory_bridge.writeSlice(stat_bytes, @intCast(notif.pid), statbuf_addr);
     return replySuccess(notif.id, 0);
 }

@@ -7,7 +7,7 @@ const BackingFD = linux.fd_t;
 
 fn sysOpenat(path: []const u8, flags: linux.O, mode: linux.mode_t) !linux.fd_t {
     var path_buf: [513]u8 = undefined;
-    if (path.len > 512) return error.NameTooLong;
+    if (path.len > 512) return error.NAMETOOLONG;
     @memcpy(path_buf[0..path.len], path);
     path_buf[path.len] = 0;
     const rc = linux.openat(linux.AT.FDCWD, path_buf[0..path.len :0], flags, mode);
@@ -65,7 +65,7 @@ pub const Cow = union(enum) {
 
     pub fn write(self: *Cow, data: []const u8) !usize {
         switch (self.*) {
-            .readthrough => return error.ReadOnlyFileSystem,
+            .readthrough => return error.ROFS,
             .writecopy => |fd| return sysWrite(fd, data),
         }
     }
@@ -97,7 +97,7 @@ pub const Cow = union(enum) {
     }
 
     pub fn statxByPath(overlay: *OverlayRoot, path: []const u8) !linux.Statx {
-        if (comptime builtin.os.tag != .linux) return error.StatxFail;
+        if (comptime builtin.os.tag != .linux) return error.NOSYS;
 
         var cow_path_buf: [512]u8 = undefined;
         const real_path = if (overlay.cowExists(path))
@@ -131,12 +131,12 @@ pub const Cow = union(enum) {
 
     pub fn connect(self: *Cow, addr: [*]const u8, addrlen: linux.socklen_t) !void {
         _ = .{ self, addr, addrlen };
-        return error.NotASocket;
+        return error.NOTSOCK;
     }
 
     pub fn shutdown(self: *Cow, how: i32) !void {
         _ = .{ self, how };
-        return error.NotASocket;
+        return error.NOTSOCK;
     }
 };
 
@@ -187,7 +187,7 @@ test "write to readthrough returns error" {
     defer file.close();
 
     // Writing to a readthrough file should fail with ReadOnlyFileSystem
-    try testing.expectError(error.ReadOnlyFileSystem, file.write("test"));
+    try testing.expectError(error.ROFS, file.write("test"));
 }
 
 test "opening /usr/bin/ls for write triggers copy to overlay" {

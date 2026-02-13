@@ -1,7 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
 const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
-const checkErr = @import("../../../linux_error.zig").checkErr;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
@@ -28,10 +27,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
     // Read path from caller's memory
     const path_ptr: u64 = notif.data.arg1;
     var path_buf: [256]u8 = undefined;
-    const path = memory_bridge.readString(&path_buf, caller_tid, path_ptr) catch |err| {
-        logger.log("openat: failed to read path string: {}", .{err});
-        return LinuxErr.FAULT;
-    };
+    const path = try memory_bridge.readString(&path_buf, caller_tid, path_ptr);
 
     const dirfd: i32 = @truncate(@as(i64, @bitCast(notif.data.arg0)));
 
@@ -48,10 +44,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
         supervisor.mutex.lockUncancelable(supervisor.io);
         defer supervisor.mutex.unlock(supervisor.io);
 
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            logger.log("openat: Thread not found for tid={d}: {}", .{ caller_tid, err });
-            return LinuxErr.SRCH;
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
 
         // Relative path with a real dirfd: use dirfd's opened path as base
         if (path[0] != '/' and dirfd != -100) {
@@ -98,66 +91,31 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
                 supervisor.mutex.lockUncancelable(supervisor.io);
                 defer supervisor.mutex.unlock(supervisor.io);
 
-                supervisor.guest_threads.syncNewThreads() catch |err| {
-                    logger.log("openat: syncNewThreads failed: {}", .{err});
-                    return LinuxErr.NOSYS;
-                };
+                try supervisor.guest_threads.syncNewThreads();
             }
 
             // Open the file via the appropriate backend
             // Note all are lock-free (independent of internal supervisor state) except for proc
             const file: *File = switch (h.backend) {
-                .passthrough => File.init(allocator, .{ .passthrough = Passthrough.open(&supervisor.overlay, h.normalized, flags, mode) catch |err| {
-                    logger.log("openat: failed to open {s}: {s}", .{ h.normalized, @errorName(err) });
-                    return LinuxErr.IO;
-                } }) catch |err| {
-                    logger.log("openat: failed to open {s}: {s}", .{ h.normalized, @errorName(err) });
-                    return LinuxErr.IO;
-                },
-                .cow => File.init(allocator, .{ .cow = Cow.open(&supervisor.overlay, h.normalized, flags, mode) catch |err| {
-                    logger.log("openat: failed to open {s}: {s}", .{ h.normalized, @errorName(err) });
-                    return LinuxErr.IO;
-                } }) catch |err| {
-                    logger.log("openat: failed to open {s}: {s}", .{ h.normalized, @errorName(err) });
-                    return LinuxErr.IO;
-                },
-                .tmp => File.init(allocator, .{ .tmp = Tmp.open(&supervisor.overlay, h.normalized, flags, mode) catch |err| {
-                    logger.log("openat: failed to open {s}: {s}", .{ h.normalized, @errorName(err) });
-                    return LinuxErr.IO;
-                } }) catch |err| {
-                    logger.log("openat: failed to open {s}: {s}", .{ h.normalized, @errorName(err) });
-                    return LinuxErr.IO;
-                },
-                .proc => File.init(allocator, .{
-                    .proc = blk: {
-                        // Special case: the open of ProcFile requires passing in the caller
-                        // So we need a critical section since get does lazy registration
-                        supervisor.mutex.lockUncancelable(supervisor.io);
-                        defer supervisor.mutex.unlock(supervisor.io);
-
-                        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-                            logger.log("openat: Thread not found for tid={d}: {}", .{ caller_tid, err });
-                            return LinuxErr.SRCH;
-                        };
-                        break :blk ProcFile.open(caller, h.normalized) catch |err| {
-                            logger.log("openat: failed to open {s}: {s}", .{ h.normalized, @errorName(err) });
-                            return if (err == error.FileNotFound) LinuxErr.NOENT else LinuxErr.IO;
-                        };
-                    },
-                }) catch |err| {
-                    logger.log("openat: failed to open {s}: {s}", .{ h.normalized, @errorName(err) });
-                    return LinuxErr.IO;
+                .passthrough => try File.init(allocator, .{ .passthrough = try Passthrough.open(&supervisor.overlay, h.normalized, flags, mode) }),
+                .cow => try File.init(allocator, .{ .cow = try Cow.open(&supervisor.overlay, h.normalized, flags, mode) }),
+                .tmp => try File.init(allocator, .{ .tmp = try Tmp.open(&supervisor.overlay, h.normalized, flags, mode) }),
+                .proc => blk: {
+                    // Special case: the open of ProcFile requires passing in the caller
+                    // So we need a critical section since get does lazy registration
+                    supervisor.mutex.lockUncancelable(supervisor.io);
+                    defer supervisor.mutex.unlock(supervisor.io);
+                    const caller = try supervisor.guest_threads.get(caller_tid);
+                    break :blk try File.init(allocator, .{ .proc = try ProcFile.open(caller, h.normalized) });
                 },
             };
+            errdefer file.unref();
 
             // Set the File's flags
             file.open_flags = flags;
 
             // Store the opened path on the File (already normalized by resolveAndRoute)
-            file.setOpenedPath(h.normalized) catch {
-                file.unref();
-                return LinuxErr.NOMEM;
-            };
+            try file.setOpenedPath(h.normalized);
 
             // Enter critical section for all backends
             // Registering newly opened file to caller's fd_table
@@ -168,18 +126,10 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
             supervisor.mutex.lockUncancelable(supervisor.io);
             defer supervisor.mutex.unlock(supervisor.io);
 
-            const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-                logger.log("openat: Thread not found for tid={d}: {}", .{ caller_tid, err });
-                file.unref();
-                return LinuxErr.SRCH;
-            };
+            const caller = try supervisor.guest_threads.get(caller_tid);
 
             // Insert into fd table and return the virtual fd
-            const vfd = caller.fd_table.insert(file, .{ .cloexec = flags.CLOEXEC }) catch {
-                logger.log("openat: failed to insert fd", .{});
-                file.unref();
-                return LinuxErr.MFILE;
-            };
+            const vfd = try caller.fd_table.insert(file, .{ .cloexec = flags.CLOEXEC });
             logger.log("openat: opened {s} as vfd={d}", .{ h.normalized, vfd });
             return replySuccess(notif.id, @intCast(vfd));
         },

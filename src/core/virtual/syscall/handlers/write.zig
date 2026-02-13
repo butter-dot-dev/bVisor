@@ -1,8 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
 const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
-const checkErr = @import("../../../linux_error.zig").checkErr;
-const types = @import("../../../types.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
@@ -31,17 +29,11 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
         var max_buf: [max_len]u8 = undefined;
         const max_count = @min(count, max_len);
         const buf: []u8 = max_buf[0..max_count];
-        memory_bridge.readSlice(buf, @intCast(caller_tid), buf_addr) catch {
-            return LinuxErr.FAULT;
-        };
+        try memory_bridge.readSlice(buf, @intCast(caller_tid), buf_addr);
         if (fd == linux.STDOUT_FILENO) {
-            supervisor.stdout.write(supervisor.io, buf) catch {
-                return LinuxErr.IO;
-            };
+            try supervisor.stdout.write(supervisor.io, buf);
         } else {
-            supervisor.stderr.write(supervisor.io, buf) catch {
-                return LinuxErr.IO;
-            };
+            try supervisor.stderr.write(supervisor.io, buf);
         }
         return replySuccess(notif.id, @intCast(max_count));
     }
@@ -54,10 +46,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
         defer supervisor.mutex.unlock(supervisor.io);
 
         // Get caller Thread
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            logger.log("write: Thread not found for tid={d}: {}", .{ caller_tid, err });
-            return LinuxErr.SRCH;
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
         std.debug.assert(caller.tid == caller_tid);
 
         file = caller.fd_table.get_ref(fd) orelse {
@@ -72,15 +61,10 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
     var max_buf: [max_len]u8 = undefined;
     const max_count = @min(count, max_len);
     const buf: []u8 = max_buf[0..max_count];
-    memory_bridge.readSlice(buf, @intCast(caller_tid), buf_addr) catch {
-        return LinuxErr.FAULT;
-    };
+    try memory_bridge.readSlice(buf, @intCast(caller_tid), buf_addr);
 
     // Write local buf to file
-    const n = file.write(buf) catch |err| {
-        logger.log("write: error writing to fd: {s}", .{@errorName(err)});
-        return LinuxErr.IO;
-    };
+    const n = try file.write(buf);
 
     logger.log("write: wrote {d} bytes", .{n});
     return replySuccess(notif.id, @intCast(n));
@@ -261,7 +245,7 @@ test "write with unknown caller PID returns ESRCH" {
     try testing.expectError(error.SRCH, handle(notif, &supervisor));
 }
 
-test "write to read-only backend (proc) returns EIO" {
+test "write to read-only backend (proc) returns EROFS" {
     const LogBuffer = @import("../../../LogBuffer.zig");
     const allocator = testing.allocator;
     const init_tid: AbsTid = 100;
@@ -284,5 +268,5 @@ test "write to read-only backend (proc) returns EIO" {
         .arg2 = data.len,
     });
 
-    try testing.expectError(error.IO, handle(notif, &supervisor));
+    try testing.expectError(error.ROFS, handle(notif, &supervisor));
 }

@@ -21,10 +21,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
     // Read path from caller's memory
     var path_buf: [256]u8 = undefined;
-    const path = memory_bridge.readString(&path_buf, caller_tid, path_ptr) catch |err| {
-        logger.log("faccessat: failed to read path string: {}", .{err});
-        return LinuxErr.FAULT;
-    };
+    const path = try memory_bridge.readString(&path_buf, caller_tid, path_ptr);
 
     if (path.len == 0) {
         return LinuxErr.INVAL;
@@ -40,10 +37,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
         defer supervisor.mutex.unlock(supervisor.io);
 
         // Get caller Thread
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            logger.log("faccessat: Thread not found for tid={d}: {}", .{ caller_tid, err });
-            return LinuxErr.SRCH;
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
 
         if (dirfd != -100) {
             const dir_file = caller.fd_table.get_ref(dirfd) orelse {
@@ -86,16 +80,10 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
                     supervisor.mutex.lockUncancelable(supervisor.io);
                     defer supervisor.mutex.unlock(supervisor.io);
 
-                    supervisor.guest_threads.syncNewThreads() catch |err| {
-                        logger.log("faccessat: syncNewThreads failed: {}", .{err});
-                        return LinuxErr.NOSYS;
-                    };
+                    try supervisor.guest_threads.syncNewThreads();
 
                     // Get caller Thread
-                    const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-                        logger.log("faccessat: Thread not found for tid={d}: {}", .{ caller_tid, err });
-                        return LinuxErr.SRCH;
-                    };
+                    const caller = try supervisor.guest_threads.get(caller_tid);
 
                     const ProcFile = @import("../../fs/backend/procfile.zig").ProcFile;
                     _ = ProcFile.open(caller, h.normalized) catch {

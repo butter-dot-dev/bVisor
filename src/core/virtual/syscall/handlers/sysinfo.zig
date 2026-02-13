@@ -1,6 +1,5 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
 const checkErr = @import("../../../linux_error.zig").checkErr;
 const Io = std.Io;
 const Supervisor = @import("../../../Supervisor.zig");
@@ -32,9 +31,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
     }
 
     const info_bytes = std.mem.asBytes(&info);
-    memory_bridge.writeSlice(info_bytes, @intCast(notif.pid), buf_addr) catch {
-        return LinuxErr.FAULT;
-    };
+    try memory_bridge.writeSlice(info_bytes, @intCast(notif.pid), buf_addr);
 
     return replySuccess(notif.id, 0);
 }

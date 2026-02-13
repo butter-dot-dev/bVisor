@@ -1,7 +1,5 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
-const checkErr = @import("../../../linux_error.zig").checkErr;
 const Supervisor = @import("../../../Supervisor.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
@@ -17,10 +15,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
     const caller_tid: AbsTid = @intCast(notif.pid);
 
     // Get caller Thread
-    const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-        std.log.err("gettid: Thread not found with tid={d}: {}", .{ caller_tid, err });
-        return LinuxErr.SRCH;
-    };
+    const caller = try supervisor.guest_threads.get(caller_tid);
     std.debug.assert(caller.tid == caller_tid);
 
     // Get namespaced TID of this caller Thread

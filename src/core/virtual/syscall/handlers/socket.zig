@@ -1,6 +1,5 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
 const checkErr = @import("../../../linux_error.zig").checkErr;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
@@ -26,27 +25,15 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
     const kernel_fd: i32 = @intCast(rc);
 
     // Wrap as passthrough File
-    const file = File.init(allocator, .{ .passthrough = .{ .fd = kernel_fd } }) catch {
-        _ = linux.close(kernel_fd);
-        logger.log("socket: failed to alloc File", .{});
-        return LinuxErr.NOMEM;
-    };
+    const file = try File.init(allocator, .{ .passthrough = .{ .fd = kernel_fd } });
+    errdefer file.unref();
 
     // Register in the caller's FdTable
     supervisor.mutex.lockUncancelable(supervisor.io);
     defer supervisor.mutex.unlock(supervisor.io);
 
-    const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-        file.unref();
-        logger.log("socket: Thread not found for tid={d}: {}", .{ caller_tid, err });
-        return LinuxErr.SRCH;
-    };
-
-    const vfd = caller.fd_table.insert(file, .{ .cloexec = cloexec }) catch {
-        file.unref();
-        logger.log("socket: failed to insert fd", .{});
-        return LinuxErr.MFILE;
-    };
+    const caller = try supervisor.guest_threads.get(caller_tid);
+    const vfd = try caller.fd_table.insert(file, .{ .cloexec = cloexec });
 
     logger.log("socket: created vfd={d}", .{vfd});
     return replySuccess(notif.id, vfd);

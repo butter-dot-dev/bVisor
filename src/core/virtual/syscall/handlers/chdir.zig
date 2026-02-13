@@ -2,7 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const linux = std.os.linux;
 const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
-const checkErr = @import("../../../linux_error.zig").checkErr;
 const Supervisor = @import("../../../Supervisor.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
@@ -25,10 +24,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
     // Read path from caller's memory
     var path_buf: [256]u8 = undefined;
-    const path = memory_bridge.readString(&path_buf, caller_tid, path_ptr) catch |err| {
-        logger.log("chdir: failed to read path string of caller with tid={d}: {}", .{ caller_tid, err });
-        return LinuxErr.FAULT;
-    };
+    const path = try memory_bridge.readString(&path_buf, caller_tid, path_ptr);
 
     if (path.len == 0) {
         return LinuxErr.NOENT;
@@ -38,10 +34,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
     defer supervisor.mutex.unlock(supervisor.io);
 
     // Get caller Thread
-    const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-        logger.log("chdir: Thread not found for tid={d}: {}", .{ caller_tid, err });
-        return LinuxErr.SRCH;
-    };
+    const caller = try supervisor.guest_threads.get(caller_tid);
     std.debug.assert(caller.tid == caller_tid);
 
     // Resolve route against cwd
@@ -56,17 +49,11 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
             // Stat the target to verify it exists and is a directory
             var caller_for_stat: ?*Thread = null;
             if (h.backend == .proc) {
-                supervisor.guest_threads.syncNewThreads() catch |err| {
-                    logger.log("chdir: syncNewThreads failed: {}", .{err});
-                    return LinuxErr.NOSYS;
-                };
+                try supervisor.guest_threads.syncNewThreads();
                 caller_for_stat = caller;
             }
 
-            const statx_buf = statxByPath(h.backend, &supervisor.overlay, h.normalized, caller_for_stat) catch |err| {
-                logger.log("chdir: stat failed for {s}: {s}", .{ h.normalized, @errorName(err) });
-                return if (err == error.FileNotFound) LinuxErr.NOENT else LinuxErr.IO;
-            };
+            const statx_buf = try statxByPath(h.backend, &supervisor.overlay, h.normalized, caller_for_stat);
 
             // Verify it's a directory
             if (statx_buf.mode & linux.S.IFMT != linux.S.IFDIR) {
@@ -74,9 +61,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
             }
 
             // Update cwd
-            caller.fs_info.setCwd(h.normalized) catch {
-                return LinuxErr.NOMEM;
-            };
+            try caller.fs_info.setCwd(h.normalized);
 
             logger.log("chdir: changed to {s}", .{caller.fs_info.cwd});
             return replySuccess(notif.id, 0);

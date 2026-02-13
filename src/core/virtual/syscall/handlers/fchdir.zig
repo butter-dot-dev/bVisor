@@ -2,7 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const linux = std.os.linux;
 const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
-const checkErr = @import("../../../linux_error.zig").checkErr;
 const Supervisor = @import("../../../Supervisor.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
@@ -24,10 +23,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
     defer supervisor.mutex.unlock(supervisor.io);
 
     // Get caller Thread
-    const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-        logger.log("fchdir: Thread not found for tid={d}: {}", .{ caller_tid, err });
-        return LinuxErr.SRCH;
-    };
+    const caller = try supervisor.guest_threads.get(caller_tid);
     std.debug.assert(caller.tid == caller_tid);
 
     // Look up fd in caller's fd_table
@@ -53,19 +49,14 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
     }
 
     // Verify it's a directory via statx
-    const statx_buf = file.statx() catch |err| {
-        logger.log("fchdir: statx failed for fd={d}: {}", .{ fd, err });
-        return LinuxErr.IO;
-    };
+    const statx_buf = try file.statx();
 
     if (statx_buf.mode & linux.S.IFMT != linux.S.IFDIR) {
         return LinuxErr.NOTDIR;
     }
 
     // Update cwd
-    caller.fs_info.setCwd(path) catch {
-        return LinuxErr.NOMEM;
-    };
+    try caller.fs_info.setCwd(path);
 
     logger.log("fchdir: changed to {s}", .{caller.fs_info.cwd});
     return replySuccess(notif.id, 0);

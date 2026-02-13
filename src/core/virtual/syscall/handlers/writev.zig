@@ -1,9 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
 const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
-const checkErr = @import("../../../linux_error.zig").checkErr;
 const iovec_const = std.posix.iovec_const;
-const types = @import("../../../types.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
@@ -32,9 +30,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
         for (0..iovec_count) |i| {
             const iov_addr = iovec_ptr + i * @sizeOf(iovec_const);
-            stdio_iovecs[i] = memory_bridge.read(iovec_const, caller_tid, iov_addr) catch {
-                return LinuxErr.FAULT;
-            };
+            stdio_iovecs[i] = try memory_bridge.read(iovec_const, caller_tid, iov_addr);
         }
 
         for (0..iovec_count) |i| {
@@ -42,21 +38,15 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
             const buf_ptr = @intFromPtr(iov.base);
             const buf_len = @min(iov.len, stdio_buf.len - stdio_len);
             if (buf_len > 0) {
-                memory_bridge.readSlice(stdio_buf[stdio_len..][0..buf_len], caller_tid, buf_ptr) catch {
-                    return LinuxErr.FAULT;
-                };
+                try memory_bridge.readSlice(stdio_buf[stdio_len..][0..buf_len], caller_tid, buf_ptr);
                 stdio_len += buf_len;
             }
         }
 
         if (fd == linux.STDOUT_FILENO) {
-            supervisor.stdout.write(supervisor.io, stdio_buf[0..stdio_len]) catch {
-                return LinuxErr.IO;
-            };
+            try supervisor.stdout.write(supervisor.io, stdio_buf[0..stdio_len]);
         } else {
-            supervisor.stderr.write(supervisor.io, stdio_buf[0..stdio_len]) catch {
-                return LinuxErr.IO;
-            };
+            try supervisor.stderr.write(supervisor.io, stdio_buf[0..stdio_len]);
         }
         return replySuccess(notif.id, @intCast(stdio_len));
     }
@@ -69,10 +59,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
         defer supervisor.mutex.unlock(supervisor.io);
 
         // Get caller Thread
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            logger.log("writev: Thread not found for tid={d}: {}", .{ caller_tid, err });
-            return LinuxErr.SRCH;
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
         std.debug.assert(caller.tid == caller_tid);
 
         file = caller.fd_table.get_ref(fd) orelse {
@@ -89,9 +76,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
     for (0..iovec_count) |i| {
         const iov_addr = iovec_ptr + i * @sizeOf(iovec_const);
-        iovecs[i] = memory_bridge.read(iovec_const, caller_tid, iov_addr) catch {
-            return LinuxErr.FAULT;
-        };
+        iovecs[i] = try memory_bridge.read(iovec_const, caller_tid, iov_addr);
     }
 
     // Read buffer data from child memory for each iovec
@@ -102,18 +87,13 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
         if (buf_len > 0) {
             const dest = data_buf[data_len..][0..buf_len];
-            memory_bridge.readSlice(dest, caller_tid, buf_ptr) catch {
-                return LinuxErr.FAULT;
-            };
+            try memory_bridge.readSlice(dest, caller_tid, buf_ptr);
             data_len += buf_len;
         }
     }
 
     // Write to the File
-    const n = file.write(data_buf[0..data_len]) catch |err| {
-        logger.log("writev: error writing to fd: {s}", .{@errorName(err)});
-        return LinuxErr.IO;
-    };
+    const n = try file.write(data_buf[0..data_len]);
 
     logger.log("writev: wrote {d} bytes", .{n});
     return replySuccess(notif.id, @intCast(n));

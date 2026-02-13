@@ -28,17 +28,11 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
         defer supervisor.mutex.unlock(supervisor.io);
 
         // Get caller Thread
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            std.log.err("tkill: Thread not found with tid={d}: {}", .{ caller_tid, err });
-            return LinuxErr.SRCH;
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
         std.debug.assert(caller.tid == caller_tid);
 
         // Lookup Thread with matching namespaced TID
-        const target = supervisor.guest_threads.getNamespaced(caller, target_nstid) catch |err| {
-            std.log.err("tkill: target Thread not found for tid={d}: {}", .{ target_nstid, err });
-            return LinuxErr.SRCH;
-        };
+        const target = try supervisor.guest_threads.getNamespaced(caller, target_nstid);
 
         // Yield the targetted TID in absolute terms
         target_abs_tid = target.tid;
@@ -46,7 +40,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
     // Execute real tkill syscall outside the lock
     const rc = linux.kill(@intCast(target_abs_tid), @enumFromInt(signal));
-    try checkErr(rc, "", .{});
+    try checkErr(rc, "tkill", .{});
 
     // Do not remove from internal Threads tracking.
     // Killing a thread is just a signal invocation.

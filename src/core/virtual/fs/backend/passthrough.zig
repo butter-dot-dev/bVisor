@@ -5,7 +5,7 @@ const OverlayRoot = @import("../../OverlayRoot.zig");
 
 fn sysOpenat(path: []const u8, flags: linux.O, mode: linux.mode_t) !linux.fd_t {
     var path_buf: [513]u8 = undefined;
-    if (path.len > 512) return error.NameTooLong;
+    if (path.len > 512) return error.NAMETOOLONG;
     @memcpy(path_buf[0..path.len], path);
     path_buf[path.len] = 0;
     const rc = linux.openat(linux.AT.FDCWD, path_buf[0..path.len :0], flags, mode);
@@ -63,7 +63,7 @@ pub const Passthrough = struct {
     }
 
     pub fn statxByPath(path: []const u8) !linux.Statx {
-        if (comptime builtin.os.tag != .linux) return error.StatxFail;
+        if (comptime builtin.os.tag != .linux) return error.NOSYS;
 
         // Open O_PATH (no permissions needed, works on any file type)
         const fd = try sysOpenat(path, .{ .PATH = true }, 0);

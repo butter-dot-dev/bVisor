@@ -1,6 +1,5 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
 const checkErr = @import("../../../linux_error.zig").checkErr;
 const Supervisor = @import("../../../Supervisor.zig");
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
@@ -34,9 +33,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
     uts.domainname = utsField("(none)");
 
     const uts_bytes = std.mem.asBytes(&uts);
-    memory_bridge.writeSlice(uts_bytes, @intCast(notif.pid), buf_addr) catch {
-        return LinuxErr.FAULT;
-    };
+    try memory_bridge.writeSlice(uts_bytes, @intCast(notif.pid), buf_addr);
 
     return replySuccess(notif.id, 0);
 }

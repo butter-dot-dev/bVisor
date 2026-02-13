@@ -1,8 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
 const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
-const checkErr = @import("../../../linux_error.zig").checkErr;
-const types = @import("../../../types.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
@@ -40,10 +38,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
         defer supervisor.mutex.unlock(supervisor.io);
 
         // Get caller Thread
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            logger.log("read: Thread not found with tid={d}: {}", .{ caller_tid, err });
-            return LinuxErr.SRCH;
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
         std.debug.assert(caller.tid == caller_tid);
 
         file = caller.fd_table.get_ref(fd) orelse {
@@ -61,16 +56,11 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
     const max_count = @min(count, max_len);
     const read_buf: []u8 = max_buf[0..max_count];
 
-    const n = file.read(read_buf) catch |err| {
-        logger.log("read: error reading from fd: {s}", .{@errorName(err)});
-        return LinuxErr.IO;
-    };
+    const n = try file.read(read_buf);
 
     // Copy into child memory space
     if (n > 0) {
-        memory_bridge.writeSlice(read_buf[0..n], @intCast(notif.pid), buf_addr) catch {
-            return LinuxErr.FAULT;
-        };
+        try memory_bridge.writeSlice(read_buf[0..n], @intCast(notif.pid), buf_addr);
     }
 
     logger.log("read: read {d} bytes", .{n});

@@ -102,13 +102,13 @@ pub fn readNsTids(tgid: AbsTgid, tid: AbsTid, nstid_buf: []NsTid) ![]NsTid {
     const path = std.fmt.bufPrintZ(&path_buf, "/proc/{d}/task/{d}/status", .{ tgid, tid }) catch unreachable;
 
     const open_rc = linux.open(path.ptr, .{ .ACCMODE = .RDONLY }, 0);
-    try checkErr(open_rc, "", .{});
+    try checkErr(open_rc, "proc_info.readNsTids.open", .{});
     const fd: linux.fd_t = @intCast(open_rc);
     defer _ = linux.close(fd);
 
     var file_buf: [4096]u8 = undefined;
     const read_rc = linux.read(fd, &file_buf, file_buf.len);
-    try checkErr(read_rc, "", .{});
+    try checkErr(read_rc, "proc_info.readNsTids.read", .{});
     const n: usize = read_rc;
 
     var nstids: []NsTid = &.{};
@@ -166,13 +166,13 @@ pub fn getStatus(tid: AbsTid) !ThreadStatus {
     const path = std.fmt.bufPrintZ(&path_buf, "/proc/{d}/status", .{tid}) catch unreachable;
 
     const open_rc = linux.open(path.ptr, .{ .ACCMODE = .RDONLY }, 0);
-    try checkErr(open_rc, "", .{});
+    try checkErr(open_rc, "proc_info.getStatus.open", .{});
     const fd: linux.fd_t = @intCast(open_rc);
     defer _ = linux.close(fd);
 
     var buf: [4096]u8 = undefined;
     const read_rc = linux.read(fd, &buf, buf.len);
-    try checkErr(read_rc, "", .{});
+    try checkErr(read_rc, "proc_info.getStatus.read", .{});
     const n: usize = read_rc;
 
     var status = ThreadStatus{
@@ -339,7 +339,7 @@ fn getNsInode(tid: AbsTid, ns_type: []const u8) ?u64 {
         0,
         @bitCast(linux.STATX{ .INO = true }),
         &stat_buf,
-    ), "", .{}) catch return null;
+    ), "proc_info.getNsInode", .{}) catch return null;
 
     return stat_buf.ino;
 }

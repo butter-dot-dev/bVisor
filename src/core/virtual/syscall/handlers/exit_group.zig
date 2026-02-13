@@ -17,10 +17,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
     defer supervisor.mutex.unlock(supervisor.io);
 
     // Get caller Thread
-    const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-        std.log.err("exit_group: Thread not found with tid={d}: {}", .{ caller_tid, err });
-        return replyContinue(notif.id);
-    };
+    const caller = supervisor.guest_threads.get(caller_tid) catch return replyContinue(notif.id);
     std.debug.assert(caller.tid == caller_tid);
 
     // Send SIGKILL for any Thread-s in the caller's ThreadGroup

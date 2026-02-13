@@ -1,7 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
 const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
-const checkErr = @import("../../../linux_error.zig").checkErr;
 const Supervisor = @import("../../../Supervisor.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
@@ -30,10 +29,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
     // Read pathname from guest memory
     var path_buf: [256]u8 = undefined;
-    const path = memory_bridge.readString(&path_buf, caller_tid, pathname_ptr) catch |err| {
-        logger.log("fstatat64: failed to read path string: {}", .{err});
-        return LinuxErr.FAULT;
-    };
+    const path = try memory_bridge.readString(&path_buf, caller_tid, pathname_ptr);
 
     // AT_EMPTY_PATH + empty pathname -> fd-based stat (same as fstat)
     if ((at_flags & AT_EMPTY_PATH) != 0 and path.len == 0) {
@@ -49,10 +45,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
             defer supervisor.mutex.unlock(supervisor.io);
 
             // Get caller Thread
-            const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-                std.log.err("fstatat64: Thread not found with tid={d}: {}", .{ caller_tid, err });
-                return replyContinue(notif.id);
-            };
+            const caller = try supervisor.guest_threads.get(caller_tid);
             std.debug.assert(caller.tid == caller_tid);
 
             file = caller.fd_table.get_ref(dirfd) orelse {
@@ -62,10 +55,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
         }
         defer file.unref();
 
-        const statx_buf = file.statx() catch |err| {
-            logger.log("fstatat64: statx failed for fd={d}: {}", .{ dirfd, err });
-            return LinuxErr.IO;
-        };
+        const statx_buf = try file.statx();
 
         return writeStatResponse(notif, statx_buf, statbuf_addr);
     }
@@ -84,10 +74,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
         supervisor.mutex.lockUncancelable(supervisor.io);
         defer supervisor.mutex.unlock(supervisor.io);
 
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            logger.log("fstatat64: Thread not found for tid={d}: {}", .{ caller_tid, err });
-            return LinuxErr.SRCH;
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
 
         // Relative path with a real dirfd: use dirfd's opened path as base
         if (path[0] != '/' and dirfd != -100) {
@@ -132,21 +119,12 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
                 supervisor.mutex.lockUncancelable(supervisor.io);
                 defer supervisor.mutex.unlock(supervisor.io);
 
-                supervisor.guest_threads.syncNewThreads() catch |err| {
-                    logger.log("fstatat64: syncNewThreads failed: {}", .{err});
-                    return LinuxErr.NOSYS;
-                };
+                try supervisor.guest_threads.syncNewThreads();
 
-                caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-                    logger.log("fstatat64: Thread not found for tid={d}: {}", .{ caller_tid, err });
-                    return LinuxErr.SRCH;
-                };
+                caller = try supervisor.guest_threads.get(caller_tid);
             }
 
-            const statx_buf = File.statxByPath(h.backend, &supervisor.overlay, h.normalized, caller) catch |err| {
-                logger.log("fstatat64: statx failed for {s}: {s}", .{ h.normalized, @errorName(err) });
-                return if (err == error.FileNotFound) LinuxErr.NOENT else LinuxErr.IO;
-            };
+            const statx_buf = try File.statxByPath(h.backend, &supervisor.overlay, h.normalized, caller);
 
             return writeStatResponse(notif, statx_buf, statbuf_addr);
         },

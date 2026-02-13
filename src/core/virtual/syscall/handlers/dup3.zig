@@ -1,7 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
 const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
-const checkErr = @import("../../../linux_error.zig").checkErr;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const Supervisor = @import("../../../Supervisor.zig");
@@ -38,10 +37,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
     defer supervisor.mutex.unlock(supervisor.io);
 
     // Get caller Thread
-    const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-        logger.log("dup3: Thread not found with tid={d}: {}", .{ caller_tid, err });
-        return LinuxErr.SRCH;
-    };
+    const caller = try supervisor.guest_threads.get(caller_tid);
 
     // Look up oldfd - get_ref() already adds a reference for us
     // This reference will be owned by the new fd entry
@@ -59,10 +55,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
     // Duplicate: both fds now point to the same File (mimicking true POSIX dup semantics)
     // The cloexec flag is per-fd, not inherited from oldfd
-    _ = caller.fd_table.dup_at(file, newfd, .{ .cloexec = flags.CLOEXEC }) catch {
-        logger.log("dup3: failed to dup to newfd={d}", .{newfd});
-        return LinuxErr.NOMEM;
-    };
+    _ = try caller.fd_table.dup_at(file, newfd, .{ .cloexec = flags.CLOEXEC });
 
     logger.log("dup3: duplicated fd {d} -> {d}", .{ oldfd, newfd });
     return replySuccess(notif.id, newfd);

@@ -1,9 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
 const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
-const checkErr = @import("../../../linux_error.zig").checkErr;
 const iovec = std.posix.iovec;
-const types = @import("../../../types.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
@@ -43,10 +41,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
         defer supervisor.mutex.unlock(supervisor.io);
 
         // Get caller Thread
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            logger.log("readv: Thread not found for tid={d}: {}", .{ caller_tid, err });
-            return LinuxErr.SRCH;
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
         std.debug.assert(caller.tid == caller_tid);
 
         file = caller.fd_table.get_ref(fd) orelse {
@@ -62,9 +57,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
     for (0..iovec_count) |i| {
         const iov_addr = iovec_ptr + i * @sizeOf(iovec);
-        iovecs[i] = memory_bridge.read(iovec, caller_tid, iov_addr) catch {
-            return LinuxErr.FAULT;
-        };
+        iovecs[i] = try memory_bridge.read(iovec, caller_tid, iov_addr);
         total_requested += iovecs[i].len;
     }
 
@@ -75,10 +68,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
     var max_buf: [max_len]u8 = undefined;
     const max_count = @min(total_requested, max_len);
     const read_buf: []u8 = max_buf[0..max_count];
-    const n = file.read(read_buf) catch |err| {
-        logger.log("readv: error reading from fd: {s}", .{@errorName(err)});
-        return LinuxErr.IO;
-    };
+    const n = try file.read(read_buf);
 
     // Distribute the read data across the child's iovec buffers
     var bytes_written: usize = 0;
@@ -91,9 +81,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
         const to_write = @min(iov.len, remaining);
 
         if (to_write > 0) {
-            memory_bridge.writeSlice(read_buf[bytes_written..][0..to_write], caller_tid, buf_ptr) catch {
-                return LinuxErr.FAULT;
-            };
+            try memory_bridge.writeSlice(read_buf[bytes_written..][0..to_write], caller_tid, buf_ptr);
             bytes_written += to_write;
         }
     }

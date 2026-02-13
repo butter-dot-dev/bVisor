@@ -6,11 +6,11 @@ const Self = @This();
 
 fn sysOpenat(path: []const u8, flags: linux.O, mode: linux.mode_t) !linux.fd_t {
     var path_buf: [513]u8 = undefined;
-    if (path.len > 512) return error.NameTooLong;
+    if (path.len > 512) return error.NAMETOOLONG;
     @memcpy(path_buf[0..path.len], path);
     path_buf[path.len] = 0;
     const rc = linux.openat(linux.AT.FDCWD, path_buf[0..path.len :0], flags, mode);
-    try checkErr(rc, "", .{});
+    try checkErr(rc, "OverlayRoot.sysOpenat", .{});
     return @intCast(rc);
 }
 
@@ -36,7 +36,7 @@ pub fn init(io: std.Io, uid: [16]u8) !Self {
         .root_dir = undefined,
         .io = io,
     };
-    const path = std.fmt.bufPrint(&self.root_path_buf, root_fmt_str, .{uid}) catch return error.NameTooLong;
+    const path = std.fmt.bufPrint(&self.root_path_buf, root_fmt_str, .{uid}) catch return error.NAMETOOLONG;
     self.root_path_len = path.len;
     self.root_dir = try std.Io.Dir.cwd().createDirPathOpen(io, path, .{});
 
@@ -63,7 +63,7 @@ pub fn createCowParentDirs(self: *Self, path: []const u8) !void {
     const relative_parent = if (parent.len > 0 and parent[0] == '/') parent[1..] else parent;
     if (relative_parent.len == 0) return;
     var subpath_buf: [512]u8 = undefined;
-    const subpath = std.fmt.bufPrint(&subpath_buf, "cow/{s}", .{relative_parent}) catch return error.NameTooLong;
+    const subpath = std.fmt.bufPrint(&subpath_buf, "cow/{s}", .{relative_parent}) catch return error.NAMETOOLONG;
     self.root_dir.createDirPath(self.io, subpath) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => return err,
@@ -73,7 +73,7 @@ pub fn createCowParentDirs(self: *Self, path: []const u8) !void {
 /// Resolves a path to its COW overlay location.
 /// e.g., /usr/bin/ls -> {root_path}/cow/usr/bin/ls
 pub fn resolveCow(self: *const Self, path: []const u8, buf: []u8) ![]const u8 {
-    return std.fmt.bufPrint(buf, "{s}/cow{s}", .{ self.rootPath(), path }) catch error.NameTooLong;
+    return std.fmt.bufPrint(buf, "{s}/cow{s}", .{ self.rootPath(), path }) catch error.NAMETOOLONG;
 }
 
 /// Resolves a path to its tmp overlay location.
@@ -85,7 +85,7 @@ pub fn resolveTmp(self: *const Self, path: []const u8, buf: []u8) ![]const u8 {
     }
     // Strip /tmp prefix: /tmp/foo -> /foo, then format as {root_path}/tmp/foo
     const suffix = path[tmp_prefix.len..];
-    return std.fmt.bufPrint(buf, "{s}/tmp{s}", .{ self.rootPath(), suffix }) catch error.NameTooLong;
+    return std.fmt.bufPrint(buf, "{s}/tmp{s}", .{ self.rootPath(), suffix }) catch error.NAMETOOLONG;
 }
 
 /// Checks if a COW copy exists for the given path.

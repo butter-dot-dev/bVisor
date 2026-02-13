@@ -35,18 +35,12 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
         defer supervisor.mutex.unlock(supervisor.io);
 
         // Get caller Thread
-        const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-            std.log.err("kill: Thread not found with tid={d}: {}", .{ caller_tid, err });
-            return LinuxErr.SRCH;
-        };
+        const caller = try supervisor.guest_threads.get(caller_tid);
         std.debug.assert(caller.tid == caller_tid);
 
         // There may be *many* candidate Thread-s satisfying having namespaced TGID == target_nstgid.
         // But, we know there must be a group leader whose namespaced TID == target_nstgid
-        const target_leader = supervisor.guest_threads.getNamespaced(caller, target_nstgid) catch |err| {
-            std.log.err("kill: target Thread not found with tid={d}: {}", .{ target_nstgid, err });
-            return LinuxErr.SRCH;
-        };
+        const target_leader = try supervisor.guest_threads.getNamespaced(caller, target_nstgid);
 
         // Yield the targetted TGID in absolute terms
         target_abstgid = target_leader.get_tgid();
@@ -55,7 +49,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
 
     // Execute real kill syscall outside the lock
     const rc = linux.kill(@intCast(target_abstgid), @enumFromInt(signal));
-    try checkErr(rc, "", .{});
+    try checkErr(rc, "kill", .{});
 
     // Do not remove from internal Threads tracking.
     // Killing a thread is just a signal invocation.

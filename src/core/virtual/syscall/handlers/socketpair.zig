@@ -1,6 +1,5 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
 const checkErr = @import("../../../linux_error.zig").checkErr;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
@@ -27,56 +26,27 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
     try checkErr(rc, "socketpair: kernel socketpair failed", .{});
 
     // Wrap both ends as passthrough Files
-    const file0 = File.init(allocator, .{ .passthrough = .{ .fd = kernel_fds[0] } }) catch {
-        _ = linux.close(kernel_fds[0]);
-        _ = linux.close(kernel_fds[1]);
-        logger.log("socketpair: failed to alloc File 0", .{});
-        return LinuxErr.NOMEM;
-    };
+    const file0 = try File.init(allocator, .{ .passthrough = .{ .fd = kernel_fds[0] } });
+    errdefer file0.unref();
 
-    const file1 = File.init(allocator, .{ .passthrough = .{ .fd = kernel_fds[1] } }) catch {
-        file0.unref();
-        _ = linux.close(kernel_fds[1]);
-        logger.log("socketpair: failed to alloc File 1", .{});
-        return LinuxErr.NOMEM;
-    };
+    const file1 = try File.init(allocator, .{ .passthrough = .{ .fd = kernel_fds[1] } });
+    errdefer file1.unref();
 
     // Register both in the caller's FdTable
     supervisor.mutex.lockUncancelable(supervisor.io);
     defer supervisor.mutex.unlock(supervisor.io);
 
-    const caller = supervisor.guest_threads.get(caller_tid) catch |err| {
-        file0.unref();
-        file1.unref();
-        logger.log("socketpair: Thread not found for tid={d}: {}", .{ caller_tid, err });
-        return LinuxErr.SRCH;
-    };
+    const caller = try supervisor.guest_threads.get(caller_tid);
 
-    const vfd0 = caller.fd_table.insert(file0, .{ .cloexec = cloexec }) catch {
-        file0.unref();
-        file1.unref();
-        logger.log("socketpair: failed to insert fd 0", .{});
-        return LinuxErr.MFILE;
-    };
+    const vfd0 = try caller.fd_table.insert(file0, .{ .cloexec = cloexec });
+    errdefer _ = caller.fd_table.remove(vfd0);
 
-    const vfd1 = caller.fd_table.insert(file1, .{ .cloexec = cloexec }) catch {
-        _ = caller.fd_table.remove(vfd0);
-        file0.unref();
-        file1.unref();
-        logger.log("socketpair: failed to insert fd 1", .{});
-        return LinuxErr.MFILE;
-    };
+    const vfd1 = try caller.fd_table.insert(file1, .{ .cloexec = cloexec });
+    errdefer _ = caller.fd_table.remove(vfd1);
 
     // Write the virtual fds back to the caller's sv[2] array
     const vfds = [2]i32{ vfd0, vfd1 };
-    memory_bridge.write([2]i32, caller_tid, vfds, sv_ptr) catch |err| {
-        _ = caller.fd_table.remove(vfd0);
-        _ = caller.fd_table.remove(vfd1);
-        file0.unref();
-        file1.unref();
-        logger.log("socketpair: failed to write fds to caller: {}", .{err});
-        return LinuxErr.FAULT;
-    };
+    try memory_bridge.write([2]i32, caller_tid, vfds, sv_ptr);
 
     logger.log("socketpair: created vfd0={d} vfd1={d}", .{ vfd0, vfd1 });
     return replySuccess(notif.id, 0);
