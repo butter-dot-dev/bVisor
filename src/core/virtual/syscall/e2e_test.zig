@@ -27,6 +27,12 @@ const close_handler = @import("handlers/close.zig").handle;
 const readv_handler = @import("handlers/readv.zig").handle;
 const writev_handler = @import("handlers/writev.zig").handle;
 const fstat_handler = @import("handlers/fstatat64.zig").handle;
+const socketpair_handler = @import("handlers/socketpair.zig").handle;
+const sendto_handler = @import("handlers/sendto.zig").handle;
+const recvfrom_handler = @import("handlers/recvfrom.zig").handle;
+const shutdown_handler = @import("handlers/shutdown.zig").handle;
+const sendmsg_handler = @import("handlers/sendmsg.zig").handle;
+const recvmsg_handler = @import("handlers/recvmsg.zig").handle;
 
 const Stat = @import("../../types.zig").Stat;
 
@@ -610,4 +616,452 @@ test "fstat on unknown VFD returns EBADF" {
 
     var stat_buf: Stat = std.mem.zeroes(Stat);
     try testing.expectError(error.BADF, fstat_handler(makeFstatNotif(init_tid, 99, &stat_buf), &supervisor));
+}
+
+fn makeSocketpairNotif(tid: AbsTid, domain: u32, sock_type: u32, protocol: u32, sv_ptr: u64) linux.SECCOMP.notif {
+    return makeNotif(.socketpair, .{
+        .pid = tid,
+        .arg0 = domain,
+        .arg1 = sock_type,
+        .arg2 = protocol,
+        .arg3 = sv_ptr,
+    });
+}
+
+fn makeSendtoNotif(tid: AbsTid, vfd: i32, data_ptr: u64, len: usize, flags: u32) linux.SECCOMP.notif {
+    return makeNotif(.sendto, .{
+        .pid = tid,
+        .arg0 = @as(u64, @bitCast(@as(i64, vfd))),
+        .arg1 = data_ptr,
+        .arg2 = len,
+        .arg3 = flags,
+        .arg4 = 0,
+        .arg5 = 0,
+    });
+}
+
+fn makeRecvfromNotif(tid: AbsTid, vfd: i32, buf_ptr: u64, len: usize, flags: u32) linux.SECCOMP.notif {
+    return makeNotif(.recvfrom, .{
+        .pid = tid,
+        .arg0 = @as(u64, @bitCast(@as(i64, vfd))),
+        .arg1 = buf_ptr,
+        .arg2 = len,
+        .arg3 = flags,
+    });
+}
+
+fn makeShutdownNotif(tid: AbsTid, vfd: i32, how: u32) linux.SECCOMP.notif {
+    return makeNotif(.shutdown, .{
+        .pid = tid,
+        .arg0 = @as(u64, @bitCast(@as(i64, vfd))),
+        .arg1 = how,
+    });
+}
+
+fn makeSendmsgNotif(tid: AbsTid, vfd: i32, msg_ptr: u64, flags: u32) linux.SECCOMP.notif {
+    return makeNotif(.sendmsg, .{
+        .pid = tid,
+        .arg0 = @as(u64, @bitCast(@as(i64, vfd))),
+        .arg1 = msg_ptr,
+        .arg2 = flags,
+    });
+}
+
+fn makeRecvmsgNotif(tid: AbsTid, vfd: i32, msg_ptr: u64, flags: u32) linux.SECCOMP.notif {
+    return makeNotif(.recvmsg, .{
+        .pid = tid,
+        .arg0 = @as(u64, @bitCast(@as(i64, vfd))),
+        .arg1 = msg_ptr,
+        .arg2 = flags,
+    });
+}
+
+test "socketpair -> sendto -> recvfrom -> close round-trip" {
+    const allocator = testing.allocator;
+    const init_tid: AbsTid = 100;
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
+    defer supervisor.deinit();
+
+    // socketpair(AF_UNIX, SOCK_STREAM)
+    var sv: [2]i32 = .{ -1, -1 };
+    _ = try socketpair_handler(
+        makeSocketpairNotif(init_tid, linux.AF.UNIX, linux.SOCK.STREAM, 0, @intFromPtr(&sv)),
+        &supervisor,
+    );
+
+    // sendto sv[0] with "hello sockets"
+    var send_data = "hello sockets".*;
+    const send_resp = try sendto_handler(
+        makeSendtoNotif(init_tid, sv[0], @intFromPtr(&send_data), send_data.len, 0),
+        &supervisor,
+    );
+    try testing.expectEqual(@as(i64, @intCast(send_data.len)), send_resp.val);
+
+    // recvfrom sv[1]
+    var recv_buf: [64]u8 = undefined;
+    const recv_resp = try recvfrom_handler(
+        makeRecvfromNotif(init_tid, sv[1], @intFromPtr(&recv_buf), recv_buf.len, 0),
+        &supervisor,
+    );
+    try testing.expectEqualStrings("hello sockets", recv_buf[0..@intCast(recv_resp.val)]);
+
+    // close both
+    _ = try close_handler(makeCloseNotif(init_tid, sv[0]), &supervisor);
+    _ = try close_handler(makeCloseNotif(init_tid, sv[1]), &supervisor);
+}
+
+test "shutdown write end -> recvfrom returns 0 (EOF)" {
+    const allocator = testing.allocator;
+    const init_tid: AbsTid = 100;
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
+    defer supervisor.deinit();
+
+    // socketpair
+    var sv: [2]i32 = .{ -1, -1 };
+    _ = try socketpair_handler(
+        makeSocketpairNotif(init_tid, linux.AF.UNIX, linux.SOCK.STREAM, 0, @intFromPtr(&sv)),
+        &supervisor,
+    );
+
+    // sendto sv[0] with "before shutdown"
+    var send_data = "before shutdown".*;
+    _ = try sendto_handler(
+        makeSendtoNotif(init_tid, sv[0], @intFromPtr(&send_data), send_data.len, 0),
+        &supervisor,
+    );
+
+    // shutdown sv[0] SHUT_WR
+    _ = try shutdown_handler(
+        makeShutdownNotif(init_tid, sv[0], linux.SHUT.WR),
+        &supervisor,
+    );
+
+    // recvfrom sv[1] -> should get "before shutdown"
+    var recv_buf: [64]u8 = undefined;
+    const recv_resp = try recvfrom_handler(
+        makeRecvfromNotif(init_tid, sv[1], @intFromPtr(&recv_buf), recv_buf.len, 0),
+        &supervisor,
+    );
+    try testing.expectEqualStrings("before shutdown", recv_buf[0..@intCast(recv_resp.val)]);
+
+    // recvfrom sv[1] again -> should return 0 (EOF)
+    const eof_resp = try recvfrom_handler(
+        makeRecvfromNotif(init_tid, sv[1], @intFromPtr(&recv_buf), recv_buf.len, 0),
+        &supervisor,
+    );
+    try testing.expectEqual(@as(i64, 0), eof_resp.val);
+
+    // close both
+    _ = try close_handler(makeCloseNotif(init_tid, sv[0]), &supervisor);
+    _ = try close_handler(makeCloseNotif(init_tid, sv[1]), &supervisor);
+}
+
+test "sendto on closed fd returns EBADF" {
+    const allocator = testing.allocator;
+    const init_tid: AbsTid = 100;
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
+    defer supervisor.deinit();
+
+    // socketpair
+    var sv: [2]i32 = .{ -1, -1 };
+    _ = try socketpair_handler(
+        makeSocketpairNotif(init_tid, linux.AF.UNIX, linux.SOCK.STREAM, 0, @intFromPtr(&sv)),
+        &supervisor,
+    );
+
+    // close sv[0]
+    _ = try close_handler(makeCloseNotif(init_tid, sv[0]), &supervisor);
+
+    // sendto on closed sv[0] -> EBADF
+    var send_data = "should fail".*;
+    try testing.expectError(error.BADF, sendto_handler(
+        makeSendtoNotif(init_tid, sv[0], @intFromPtr(&send_data), send_data.len, 0),
+        &supervisor,
+    ));
+
+    // close sv[1]
+    _ = try close_handler(makeCloseNotif(init_tid, sv[1]), &supervisor);
+}
+
+test "sendmsg single iovec -> recvfrom round-trip" {
+    const allocator = testing.allocator;
+    const init_tid: AbsTid = 100;
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
+    defer supervisor.deinit();
+
+    // socketpair
+    var sv: [2]i32 = .{ -1, -1 };
+    _ = try socketpair_handler(
+        makeSocketpairNotif(init_tid, linux.AF.UNIX, linux.SOCK.STREAM, 0, @intFromPtr(&sv)),
+        &supervisor,
+    );
+
+    // sendmsg with single iovec
+    var data = "single iov msg".*;
+    var iov = [_]iovec_const{
+        .{ .base = &data, .len = data.len },
+    };
+    var msg = linux.msghdr_const{
+        .name = null,
+        .namelen = 0,
+        .iov = &iov,
+        .iovlen = 1,
+        .control = null,
+        .controllen = 0,
+        .flags = 0,
+    };
+
+    const send_resp = try sendmsg_handler(
+        makeSendmsgNotif(init_tid, sv[0], @intFromPtr(&msg), 0),
+        &supervisor,
+    );
+    try testing.expectEqual(@as(i64, @intCast(data.len)), send_resp.val);
+
+    // recvfrom on sv[1]
+    var recv_buf: [64]u8 = undefined;
+    const recv_resp = try recvfrom_handler(
+        makeRecvfromNotif(init_tid, sv[1], @intFromPtr(&recv_buf), recv_buf.len, 0),
+        &supervisor,
+    );
+    try testing.expectEqualStrings("single iov msg", recv_buf[0..@intCast(recv_resp.val)]);
+
+    // close both
+    _ = try close_handler(makeCloseNotif(init_tid, sv[0]), &supervisor);
+    _ = try close_handler(makeCloseNotif(init_tid, sv[1]), &supervisor);
+}
+
+test "sendmsg multi-iovec -> recvmsg multi-iovec scatter" {
+    const allocator = testing.allocator;
+    const init_tid: AbsTid = 100;
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
+    defer supervisor.deinit();
+
+    // socketpair
+    var sv: [2]i32 = .{ -1, -1 };
+    _ = try socketpair_handler(
+        makeSocketpairNotif(init_tid, linux.AF.UNIX, linux.SOCK.STREAM, 0, @intFromPtr(&sv)),
+        &supervisor,
+    );
+
+    // sendmsg with 3 iovecs: "aaa", "bbb", "ccc"
+    var d1 = "aaa".*;
+    var d2 = "bbb".*;
+    var d3 = "ccc".*;
+    var send_iov = [_]iovec_const{
+        .{ .base = &d1, .len = d1.len },
+        .{ .base = &d2, .len = d2.len },
+        .{ .base = &d3, .len = d3.len },
+    };
+    var send_msg = linux.msghdr_const{
+        .name = null,
+        .namelen = 0,
+        .iov = &send_iov,
+        .iovlen = 3,
+        .control = null,
+        .controllen = 0,
+        .flags = 0,
+    };
+
+    const send_resp = try sendmsg_handler(
+        makeSendmsgNotif(init_tid, sv[0], @intFromPtr(&send_msg), 0),
+        &supervisor,
+    );
+    try testing.expectEqual(@as(i64, 9), send_resp.val);
+
+    // recvmsg with 3 iovecs of len 3 each
+    var r1: [3]u8 = undefined;
+    var r2: [3]u8 = undefined;
+    var r3: [3]u8 = undefined;
+    var recv_iov = [_]iovec{
+        .{ .base = &r1, .len = 3 },
+        .{ .base = &r2, .len = 3 },
+        .{ .base = &r3, .len = 3 },
+    };
+    var recv_msg = linux.msghdr{
+        .name = null,
+        .namelen = 0,
+        .iov = &recv_iov,
+        .iovlen = 3,
+        .control = null,
+        .controllen = 0,
+        .flags = 0,
+    };
+
+    const recv_resp = try recvmsg_handler(
+        makeRecvmsgNotif(init_tid, sv[1], @intFromPtr(&recv_msg), 0),
+        &supervisor,
+    );
+    try testing.expectEqual(@as(i64, 9), recv_resp.val);
+
+    // Verify scatter correctness
+    try testing.expectEqualStrings("aaa", &r1);
+    try testing.expectEqualStrings("bbb", &r2);
+    try testing.expectEqualStrings("ccc", &r3);
+
+    // close both
+    _ = try close_handler(makeCloseNotif(init_tid, sv[0]), &supervisor);
+    _ = try close_handler(makeCloseNotif(init_tid, sv[1]), &supervisor);
+}
+
+test "sendto -> recvmsg cross-API round-trip" {
+    const allocator = testing.allocator;
+    const init_tid: AbsTid = 100;
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
+    defer supervisor.deinit();
+
+    // socketpair
+    var sv: [2]i32 = .{ -1, -1 };
+    _ = try socketpair_handler(
+        makeSocketpairNotif(init_tid, linux.AF.UNIX, linux.SOCK.STREAM, 0, @intFromPtr(&sv)),
+        &supervisor,
+    );
+
+    // sendto sv[0] with "cross api"
+    var send_data = "cross api".*;
+    _ = try sendto_handler(
+        makeSendtoNotif(init_tid, sv[0], @intFromPtr(&send_data), send_data.len, 0),
+        &supervisor,
+    );
+
+    // recvmsg sv[1] with single iovec
+    var recv_buf: [64]u8 = undefined;
+    var recv_iov = [_]iovec{
+        .{ .base = &recv_buf, .len = recv_buf.len },
+    };
+    var recv_msg = linux.msghdr{
+        .name = null,
+        .namelen = 0,
+        .iov = &recv_iov,
+        .iovlen = 1,
+        .control = null,
+        .controllen = 0,
+        .flags = 0,
+    };
+
+    const recv_resp = try recvmsg_handler(
+        makeRecvmsgNotif(init_tid, sv[1], @intFromPtr(&recv_msg), 0),
+        &supervisor,
+    );
+    try testing.expectEqualStrings("cross api", recv_buf[0..@intCast(recv_resp.val)]);
+
+    // close both
+    _ = try close_handler(makeCloseNotif(init_tid, sv[0]), &supervisor);
+    _ = try close_handler(makeCloseNotif(init_tid, sv[1]), &supervisor);
+}
+
+test "multiple sends -> single large recvfrom" {
+    const allocator = testing.allocator;
+    const init_tid: AbsTid = 100;
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
+    defer supervisor.deinit();
+
+    // socketpair (SOCK_STREAM so data coalesces)
+    var sv: [2]i32 = .{ -1, -1 };
+    _ = try socketpair_handler(
+        makeSocketpairNotif(init_tid, linux.AF.UNIX, linux.SOCK.STREAM, 0, @intFromPtr(&sv)),
+        &supervisor,
+    );
+
+    // sendto sv[0] "chunk1"
+    var c1 = "chunk1".*;
+    _ = try sendto_handler(
+        makeSendtoNotif(init_tid, sv[0], @intFromPtr(&c1), c1.len, 0),
+        &supervisor,
+    );
+
+    // sendto sv[0] "chunk2"
+    var c2 = "chunk2".*;
+    _ = try sendto_handler(
+        makeSendtoNotif(init_tid, sv[0], @intFromPtr(&c2), c2.len, 0),
+        &supervisor,
+    );
+
+    // recvfrom sv[1] with large buffer
+    var recv_buf: [256]u8 = undefined;
+    const recv_resp = try recvfrom_handler(
+        makeRecvfromNotif(init_tid, sv[1], @intFromPtr(&recv_buf), recv_buf.len, 0),
+        &supervisor,
+    );
+    try testing.expectEqualStrings("chunk1chunk2", recv_buf[0..@intCast(recv_resp.val)]);
+
+    // close both
+    _ = try close_handler(makeCloseNotif(init_tid, sv[0]), &supervisor);
+    _ = try close_handler(makeCloseNotif(init_tid, sv[1]), &supervisor);
+}
+
+test "recvfrom writes back source address length" {
+    const allocator = testing.allocator;
+    const init_tid: AbsTid = 100;
+    var stdout_buf = LogBuffer.init(allocator);
+    var stderr_buf = LogBuffer.init(allocator);
+    defer stdout_buf.deinit();
+    defer stderr_buf.deinit();
+    var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
+    defer supervisor.deinit();
+
+    // socketpair(AF_UNIX, SOCK_STREAM)
+    var sv: [2]i32 = .{ -1, -1 };
+    _ = try socketpair_handler(
+        makeSocketpairNotif(init_tid, linux.AF.UNIX, linux.SOCK.STREAM, 0, @intFromPtr(&sv)),
+        &supervisor,
+    );
+
+    // sendto sv[0]
+    var send_data = "addr test".*;
+    _ = try sendto_handler(
+        makeSendtoNotif(init_tid, sv[0], @intFromPtr(&send_data), send_data.len, 0),
+        &supervisor,
+    );
+
+    // recvfrom sv[1] with src_addr and addrlen pointers
+    var recv_buf: [64]u8 = undefined;
+    var src_addr: [128]u8 = undefined;
+    var addrlen: linux.socklen_t = @sizeOf(@TypeOf(src_addr));
+    const notif = makeNotif(.recvfrom, .{
+        .pid = init_tid,
+        .arg0 = @as(u64, @bitCast(@as(i64, sv[1]))),
+        .arg1 = @intFromPtr(&recv_buf),
+        .arg2 = recv_buf.len,
+        .arg3 = 0,
+        .arg4 = @intFromPtr(&src_addr),
+        .arg5 = @intFromPtr(&addrlen),
+    });
+    const recv_resp = try recvfrom_handler(notif, &supervisor);
+    try testing.expectEqualStrings("addr test", recv_buf[0..@intCast(recv_resp.val)]);
+
+    // addrlen should have been written back by the handler
+    // For AF_UNIX SOCK_STREAM socketpair, the kernel writes back the actual address length
+    try testing.expect(addrlen <= @sizeOf(@TypeOf(src_addr)));
+
+    // close both
+    _ = try close_handler(makeCloseNotif(init_tid, sv[0]), &supervisor);
+    _ = try close_handler(makeCloseNotif(init_tid, sv[1]), &supervisor);
 }

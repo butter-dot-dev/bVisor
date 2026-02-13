@@ -38,6 +38,10 @@ const socketpair = @import("handlers/socketpair.zig");
 const connect = @import("handlers/connect.zig");
 const shutdown = @import("handlers/shutdown.zig");
 const ioctl = @import("handlers/ioctl.zig");
+const recvfrom = @import("handlers/recvfrom.zig");
+const sendto = @import("handlers/sendto.zig");
+const sendmsg = @import("handlers/sendmsg.zig");
+const recvmsg = @import("handlers/recvmsg.zig");
 
 pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOMP.notif_resp {
     const sys: linux.SYS = @enumFromInt(notif.data.nr);
@@ -68,6 +72,10 @@ pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux
         .connect => connect.handle(notif, supervisor),
         .shutdown => shutdown.handle(notif, supervisor),
         .ioctl => ioctl.handle(notif, supervisor),
+        .recvfrom => recvfrom.handle(notif, supervisor),
+        .sendto => sendto.handle(notif, supervisor),
+        .sendmsg => sendmsg.handle(notif, supervisor),
+        .recvmsg => recvmsg.handle(notif, supervisor),
         // Implemented - process
         .getpid => getpid.handle(notif, supervisor),
         .getppid => getppid.handle(notif, supervisor),

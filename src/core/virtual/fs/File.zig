@@ -200,3 +200,15 @@ pub fn shutdown(self: *Self, how: i32) !void {
         inline else => |*f| return f.shutdown(how),
     }
 }
+
+pub fn recvFrom(self: *Self, buf: []u8, flags: u32, src_addr: ?[*]u8, src_addrlen: ?*linux.socklen_t) !usize {
+    switch (self.backend) {
+        inline else => |*f| return f.recvFrom(buf, flags, src_addr, src_addrlen),
+    }
+}
+
+pub fn sendTo(self: *Self, data: []const u8, flags: u32, dest_addr: ?[*]const u8, addrlen: linux.socklen_t) !usize {
+    switch (self.backend) {
+        inline else => |*f| return f.sendTo(data, flags, dest_addr, addrlen),
+    }
+}
