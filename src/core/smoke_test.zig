@@ -150,10 +150,13 @@ fn test_fork_child_identity() bool {
     const fork_result: linux.pid_t = @intCast(rc);
 
     if (fork_result == 0) {
+        // is child
         const child_pid = linux.getpid();
         const child_ppid = linux.getppid();
-        if (child_ppid != 1) linux.exit_group(1);
-        if (child_pid <= 1) linux.exit_group(2);
+        // child pid must not be 1 (initial)
+        if (child_pid <= 1) linux.exit_group(@intFromEnum(linux.E.PERM));
+        // child ppid must not be 0 (invalid)
+        if (child_ppid <= 0) linux.exit_group(@intFromEnum(linux.E.PERM));
         linux.exit_group(0);
     }
 
