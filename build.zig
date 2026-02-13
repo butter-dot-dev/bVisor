@@ -8,8 +8,6 @@ pub fn build(b: *std.Build) void {
     const fail_loudly = b.option(bool, "fail-loudly", "crash immediately on unsupported syscall") orelse false;
     options.addOption(bool, "fail_loudly", fail_loudly);
 
-    // exe.root_module.addOptions("config", options);
-
     // Callers can select an architecture to target
     // It defaults to the host architecture
     const Arch = enum { aarch64, x86_64 };
