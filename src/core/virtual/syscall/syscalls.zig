@@ -5,6 +5,7 @@ const types = @import("../../types.zig");
 const Supervisor = @import("../../Supervisor.zig");
 const LinuxErr = @import("../../linux_error.zig").LinuxErr;
 const replyContinue = @import("../../seccomp/notif.zig").replyContinue;
+const replyErr = @import("../../seccomp/notif.zig").replyErr;
 
 const read = @import("handlers/read.zig");
 const write = @import("handlers/write.zig");
@@ -170,8 +171,7 @@ pub inline fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux
 }
 
 /// Handle an unsupported syscall.
-/// In debug mode, print a message and crash.
-/// In release mode, return ENOSYS.
+/// Returns an error if compiled with `-Dfail_loudly`, otherwise silently returns ENOSYS.
 fn handleUnsupported(id: u64, syscall: linux.SYS) linux.SECCOMP.notif_resp {
     if (config.fail_loudly) {
         std.debug.panic("Unsupported syscall: {s}", .{@tagName(syscall)});
