@@ -96,6 +96,20 @@ pub const Passthrough = struct {
         const rc = linux.shutdown(self.fd, how);
         try checkErr(rc, "passthrough.shutdown", .{});
     }
+
+    pub fn recvFrom(self: *Passthrough, buf: []u8, flags: u32, src_addr: ?[*]u8, src_addrlen: ?*linux.socklen_t) !usize {
+        const addr: ?*linux.sockaddr = if (src_addr) |a| @ptrCast(@alignCast(a)) else null;
+        const rc = linux.recvfrom(self.fd, buf.ptr, buf.len, flags, addr, src_addrlen);
+        try checkErr(rc, "passthrough.recvFrom", .{});
+        return rc;
+    }
+
+    pub fn sendTo(self: *Passthrough, data: []const u8, flags: u32, dest_addr: ?[*]const u8, addrlen: linux.socklen_t) !usize {
+        const addr: ?*const linux.sockaddr = if (dest_addr) |a| @ptrCast(@alignCast(a)) else null;
+        const rc = linux.sendto(self.fd, data.ptr, data.len, flags, addr, addrlen);
+        try checkErr(rc, "passthrough.sendTo", .{});
+        return rc;
+    }
 };
 
 const testing = std.testing;
