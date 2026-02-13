@@ -1,6 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const OverlayRoot = @import("../../OverlayRoot.zig");
 
 const builtin = @import("builtin");
@@ -185,7 +185,7 @@ test "sandbox B cannot see sandbox A's /tmp files" {
 
     // B tries to open it RDONLY (no CREAT) - should get file-not-found
     const result = Tmp.open(&overlay_b, "/tmp/secret.txt", .{ .ACCMODE = .RDONLY }, 0);
-    try testing.expectError(error.FileNotFound, result);
+    try testing.expectError(error.NOENT, result);
 }
 
 test "resolveTmp on non-/tmp path returns InvalidPath" {
@@ -205,7 +205,7 @@ test "fresh sandbox open /tmp/anything RDONLY without CREAT fails" {
     defer overlay.deinit();
 
     const result = Tmp.open(&overlay, "/tmp/anything", .{ .ACCMODE = .RDONLY }, 0);
-    try testing.expectError(error.FileNotFound, result);
+    try testing.expectError(error.NOENT, result);
 }
 
 test "overwrite existing tmp file with TRUNC" {

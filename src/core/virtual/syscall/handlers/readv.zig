@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../LinuxErr.zig").LinuxErr;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const iovec = std.posix.iovec;
 const types = @import("../../../types.zig");
 const Thread = @import("../../proc/Thread.zig");
@@ -196,7 +196,7 @@ test "readv FD 0 returns replyContinue" {
         .arg2 = 1,
     });
 
-    const resp = handle(notif, &supervisor);
+    const resp = try handle(notif, &supervisor);
     try testing.expect(isContinue(resp));
 }
 
@@ -222,7 +222,5 @@ test "readv non-existent VFD returns EBADF" {
         .arg2 = 1,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
+    try testing.expectError(error.BADF, handle(notif, &supervisor));
 }

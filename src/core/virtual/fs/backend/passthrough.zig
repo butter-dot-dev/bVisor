@@ -1,6 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const OverlayRoot = @import("../../OverlayRoot.zig");
 
 fn sysOpenat(path: []const u8, flags: linux.O, mode: linux.mode_t) !linux.fd_t {

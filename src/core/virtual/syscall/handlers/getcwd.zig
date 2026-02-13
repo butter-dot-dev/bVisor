@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../LinuxErr.zig").LinuxErr;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Supervisor = @import("../../../Supervisor.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
@@ -88,9 +88,7 @@ test "getcwd returns ERANGE when buffer too small" {
         .arg0 = @intFromPtr(&buf),
         .arg1 = buf.len, // 1 byte, too small for "/" + null
     });
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.RANGE))), resp.@"error");
+    try testing.expectError(error.RANGE, handle(notif, &supervisor));
 }
 
 test "getcwd returns ESRCH for unknown tid" {
@@ -109,10 +107,7 @@ test "getcwd returns ESRCH for unknown tid" {
         .arg0 = @intFromPtr(&buf),
         .arg1 = buf.len,
     });
-    const resp = handle(notif, &supervisor);
-
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+    try testing.expectError(error.SRCH, handle(notif, &supervisor));
 }
 
 test "getcwd reflects cwd change" {

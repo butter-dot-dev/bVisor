@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../LinuxErr.zig").LinuxErr;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Supervisor = @import("../../../Supervisor.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 const LogBuffer = @import("../../../LogBuffer.zig");
@@ -54,7 +54,7 @@ test "getpid returns init Thread's AbsTgid" {
     defer supervisor.deinit();
 
     const notif = makeNotif(.getpid, .{ .pid = init_tid });
-    const resp = handle(notif, &supervisor);
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(init_tid, resp.val);
 }
 
@@ -77,6 +77,6 @@ test "getpid for child Thread returns its AbsTgid" {
     // Child calls getpid
     //   ... supposing converted child's requested pid to be :AbsTid
     const notif = makeNotif(.getpid, .{ .pid = child_tid });
-    const resp = handle(notif, &supervisor);
+    const resp = try handle(notif, &supervisor);
     try testing.expectEqual(child_tid, resp.val);
 }

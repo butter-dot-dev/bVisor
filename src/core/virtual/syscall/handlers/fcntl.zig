@@ -1,8 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../LinuxErr.zig").LinuxErr;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const Supervisor = @import("../../../Supervisor.zig");
@@ -194,7 +194,6 @@ fn handleSetFl(
 
 const testing = std.testing;
 const makeNotif = @import("../../../seccomp/notif.zig").makeNotif;
-const isError = @import("../../../seccomp/notif.zig").isError;
 const File = @import("../../fs/File.zig");
 const FdTable = @import("../../fs/FdTable.zig");
 const LogBuffer = @import("../../../LogBuffer.zig");
@@ -264,14 +263,14 @@ test "F_SETFD sets cloexec" {
     file.open_flags = .{};
     const vfd = try caller.fd_table.insert(file, .{});
 
-    try handle(makeFcntlNotif(100, vfd, F.SETFD, linux.FD_CLOEXEC), &supervisor);
+    _ = try handle(makeFcntlNotif(100, vfd, F.SETFD, linux.FD_CLOEXEC), &supervisor);
 
-    const get_resp = handle(makeFcntlNotif(100, vfd, F.GETFD, 0), &supervisor);
+    const get_resp = try handle(makeFcntlNotif(100, vfd, F.GETFD, 0), &supervisor);
     try testing.expectEqual(@as(i64, linux.FD_CLOEXEC), get_resp.val);
 
-    try handle(makeFcntlNotif(100, vfd, F.SETFD, 0), &supervisor);
+    _ = try handle(makeFcntlNotif(100, vfd, F.SETFD, 0), &supervisor);
 
-    const get_resp2 = handle(makeFcntlNotif(100, vfd, F.GETFD, 0), &supervisor);
+    const get_resp2 = try handle(makeFcntlNotif(100, vfd, F.GETFD, 0), &supervisor);
     try testing.expectEqual(@as(i64, 0), get_resp2.val);
 }
 
@@ -316,10 +315,10 @@ test "F_SETFL changes mutable flags but preserves ACCMODE" {
 
     // Set NONBLOCK (mutable) and try to change ACCMODE (immutable)
     const new_flags: linux.O = .{ .ACCMODE = .RDWR, .NONBLOCK = true };
-    try handle(makeFcntlNotif(100, vfd, F.SETFL, @as(u32, @bitCast(new_flags))), &supervisor);
+    _ = try handle(makeFcntlNotif(100, vfd, F.SETFL, @as(u32, @bitCast(new_flags))), &supervisor);
 
     // Verify: NONBLOCK should be set, ACCMODE should still be RDONLY
-    const get_resp = handle(makeFcntlNotif(100, vfd, F.GETFL, 0), &supervisor);
+    const get_resp = try handle(makeFcntlNotif(100, vfd, F.GETFL, 0), &supervisor);
     const result: linux.O = @bitCast(@as(u32, @intCast(get_resp.val)));
     try testing.expect(result.NONBLOCK);
     try testing.expect(result.ACCMODE == .RDONLY);

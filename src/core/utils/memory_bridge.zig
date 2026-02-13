@@ -3,8 +3,7 @@ const builtin = @import("builtin");
 const linux = std.os.linux;
 const iovec = std.posix.iovec;
 const iovec_const = std.posix.iovec_const;
-const types = @import("../types.zig");
-const LinuxResult = types.LinuxResult;
+const checkErr = @import("../linux_error.zig").checkErr;
 
 /// Read an object of type T from child_addr in child's address space
 /// This creates a copy in the local process
@@ -25,9 +24,10 @@ pub inline fn read(T: type, child_pid: linux.pid_t, child_addr: u64) !T {
         .len = @sizeOf(T),
     }};
 
-    _ = try LinuxResult(usize).from(
+    try checkErr(
         linux.process_vm_readv(child_pid, &local_iovec, &child_iovec, 0),
-    ).unwrap();
+        "", .{},
+    );
     return local_T;
 }
 
@@ -48,9 +48,10 @@ pub inline fn readSlice(dest: []u8, child_pid: linux.pid_t, child_addr: u64) !vo
         .len = dest.len,
     }};
 
-    _ = try LinuxResult(usize).from(
+    try checkErr(
         linux.process_vm_readv(child_pid, &local_iovec, &child_iovec, 0),
-    ).unwrap();
+        "", .{},
+    );
 }
 
 /// Read a null-terminated string from addr into buf
@@ -80,9 +81,10 @@ pub inline fn write(T: type, child_pid: linux.pid_t, val: T, child_addr: u64) !v
         .len = @sizeOf(T),
     }};
 
-    _ = try LinuxResult(usize).from(
+    try checkErr(
         linux.process_vm_writev(child_pid, &local_iovec, &child_iovec, 0),
-    ).unwrap();
+        "", .{},
+    );
 }
 
 /// Write bytes from local buffer into child's address space
@@ -102,9 +104,10 @@ pub inline fn writeSlice(src: []const u8, child_pid: linux.pid_t, child_addr: u6
         .len = src.len,
     }};
 
-    _ = try LinuxResult(usize).from(
+    try checkErr(
         linux.process_vm_writev(child_pid, &local_iovec, &child_iovec, 0),
-    ).unwrap();
+        "", .{},
+    );
 }
 
 /// Write a null-terminated string from src to addr

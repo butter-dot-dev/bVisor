@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../LinuxErr.zig").LinuxErr;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Supervisor = @import("../../../Supervisor.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 const LogBuffer = @import("../../../LogBuffer.zig");
@@ -79,9 +79,7 @@ test "kill with negative pid returns EINVAL" {
         .arg1 = 9,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intFromEnum(linux.E.INVAL)), resp.@"error");
+    try testing.expectError(error.INVAL, handle(notif, &supervisor));
 }
 
 test "kill with zero pid returns EINVAL" {
@@ -99,7 +97,5 @@ test "kill with zero pid returns EINVAL" {
         .arg1 = 9,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intFromEnum(linux.E.INVAL)), resp.@"error");
+    try testing.expectError(error.INVAL, handle(notif, &supervisor));
 }

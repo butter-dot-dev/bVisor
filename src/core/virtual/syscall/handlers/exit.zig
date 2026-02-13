@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../LinuxErr.zig").LinuxErr;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Allocator = std.mem.Allocator;
 const Supervisor = @import("../../../Supervisor.zig");
 const Thread = @import("../../proc/Thread.zig");
@@ -33,7 +33,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
             if (thread != caller) {
                 // Send SIGKILL for any descendants (which will trigger other `exit` syscalls via the kernel)
                 const rc = linux.kill(thread.tid, linux.SIG.KILL);
-                try checkErr(rc, "exit: kill({d}) during namespace cleanup", .{thread.tid});
+                checkErr(rc, "exit: kill({d}) during namespace cleanup", .{thread.tid}) catch {};
             }
         }
     }

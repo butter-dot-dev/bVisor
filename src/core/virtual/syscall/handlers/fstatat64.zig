@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../LinuxErr.zig").LinuxErr;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Supervisor = @import("../../../Supervisor.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
@@ -153,12 +153,10 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
     }
 }
 
-fn writeStatResponse(notif: linux.SECCOMP.notif, statx_buf: linux.Statx, statbuf_addr: u64) linux.SECCOMP.notif_resp {
+fn writeStatResponse(notif: linux.SECCOMP.notif, statx_buf: linux.Statx, statbuf_addr: u64) !linux.SECCOMP.notif_resp {
     const stat_buf = statxToStat(statx_buf);
     const stat_bytes = std.mem.asBytes(&stat_buf);
-    memory_bridge.writeSlice(stat_bytes, @intCast(notif.pid), statbuf_addr) catch {
-        return LinuxErr.FAULT;
-    };
+    try memory_bridge.writeSlice(stat_bytes, @intCast(notif.pid), statbuf_addr);
     return replySuccess(notif.id, 0);
 }
 
@@ -208,10 +206,7 @@ test "fstatat64 blocked path /sys returns EPERM" {
         .arg2 = @intFromPtr(&stat_result),
         .arg3 = @as(u64, 0),
     });
-    const resp = handle(notif, &supervisor);
-
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.PERM))), resp.@"error");
+    try testing.expectError(error.PERM, handle(notif, &supervisor));
 }
 
 test "fstatat64 empty path without AT_EMPTY_PATH returns EINVAL" {
@@ -232,10 +227,7 @@ test "fstatat64 empty path without AT_EMPTY_PATH returns EINVAL" {
         .arg2 = @intFromPtr(&stat_result),
         .arg3 = @as(u64, 0), // no AT_EMPTY_PATH
     });
-    const resp = handle(notif, &supervisor);
-
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.INVAL))), resp.@"error");
+    try testing.expectError(error.INVAL, handle(notif, &supervisor));
 }
 
 test "fstatat64 unknown tid returns ESRCH" {
@@ -256,10 +248,7 @@ test "fstatat64 unknown tid returns ESRCH" {
         .arg2 = @intFromPtr(&stat_result),
         .arg3 = @as(u64, 0),
     });
-    const resp = handle(notif, &supervisor);
-
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+    try testing.expectError(error.SRCH, handle(notif, &supervisor));
 }
 
 test "fstatat64 AT_EMPTY_PATH with proc fd succeeds" {

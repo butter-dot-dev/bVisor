@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../LinuxErr.zig").LinuxErr;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
@@ -169,9 +169,7 @@ test "lseek to negative offset returns EINVAL" {
         .arg2 = linux.SEEK.SET,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.INVAL))), resp.@"error");
+    try testing.expectError(error.INVAL, handle(notif, &supervisor));
 }
 
 test "lseek on stdin returns ESPIPE" {
@@ -191,9 +189,7 @@ test "lseek on stdin returns ESPIPE" {
         .arg2 = linux.SEEK.SET,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SPIPE))), resp.@"error");
+    try testing.expectError(error.SPIPE, handle(notif, &supervisor));
 }
 
 test "lseek on stdout returns ESPIPE" {
@@ -213,9 +209,7 @@ test "lseek on stdout returns ESPIPE" {
         .arg2 = linux.SEEK.SET,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SPIPE))), resp.@"error");
+    try testing.expectError(error.SPIPE, handle(notif, &supervisor));
 }
 
 test "lseek on non-existent VFD returns EBADF" {
@@ -235,9 +229,7 @@ test "lseek on non-existent VFD returns EBADF" {
         .arg2 = linux.SEEK.SET,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
+    try testing.expectError(error.BADF, handle(notif, &supervisor));
 }
 
 test "lseek with invalid whence returns EINVAL" {
@@ -261,9 +253,7 @@ test "lseek with invalid whence returns EINVAL" {
         .arg2 = 99, // invalid whence
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.INVAL))), resp.@"error");
+    try testing.expectError(error.INVAL, handle(notif, &supervisor));
 }
 
 test "lseek with unknown caller PID returns ESRCH" {
@@ -283,7 +273,5 @@ test "lseek with unknown caller PID returns ESRCH" {
         .arg2 = linux.SEEK.SET,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+    try testing.expectError(error.SRCH, handle(notif, &supervisor));
 }

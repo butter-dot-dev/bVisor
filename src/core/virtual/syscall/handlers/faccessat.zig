@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../LinuxErr.zig").LinuxErr;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const path_router = @import("../../path.zig");
@@ -149,9 +149,7 @@ test "faccessat blocked path returns EACCES" {
     var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
-    const resp = handle(makeAccessatNotif(init_tid, "/sys/class/net", 0), &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.ACCES))), resp.@"error");
+    try testing.expectError(error.ACCES, handle(makeAccessatNotif(init_tid, "/sys/class/net", 0), &supervisor));
 }
 
 test "faccessat /proc/self returns success" {
@@ -193,9 +191,7 @@ test "faccessat unknown caller returns ESRCH" {
     var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
-    const resp = handle(makeAccessatNotif(999, "/proc/self", 0), &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+    try testing.expectError(error.SRCH, handle(makeAccessatNotif(999, "/proc/self", 0), &supervisor));
 }
 
 test "faccessat /proc/999 non-existent returns ENOENT" {
@@ -208,7 +204,5 @@ test "faccessat /proc/999 non-existent returns ENOENT" {
     var supervisor = try Supervisor.init(allocator, testing.io, generateUid(testing.io), -1, init_tid, &stdout_buf, &stderr_buf);
     defer supervisor.deinit();
 
-    const resp = handle(makeAccessatNotif(init_tid, "/proc/999", 0), &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.NOENT))), resp.@"error");
+    try testing.expectError(error.NOENT, handle(makeAccessatNotif(init_tid, "/proc/999", 0), &supervisor));
 }

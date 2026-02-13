@@ -1,6 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
-const checkErr = @import("../LinuxErr.zig").checkErr;
+const checkErr = @import("../linux_error.zig").checkErr;
 
 const Self = @This();
 
@@ -10,7 +10,7 @@ fn sysOpenat(path: []const u8, flags: linux.O, mode: linux.mode_t) !linux.fd_t {
     @memcpy(path_buf[0..path.len], path);
     path_buf[path.len] = 0;
     const rc = linux.openat(linux.AT.FDCWD, path_buf[0..path.len :0], flags, mode);
-    try checkErr(rc, "", {});
+    try checkErr(rc, "", .{});
     return @intCast(rc);
 }
 

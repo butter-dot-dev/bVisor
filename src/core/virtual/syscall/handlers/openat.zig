@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../LinuxErr.zig").LinuxErr;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
@@ -242,9 +242,7 @@ test "openat /sys/class/net returns EPERM" {
     defer supervisor.deinit();
 
     const notif = makeOpenatNotif(init_tid, "/sys/class/net", 0, 0);
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.PERM))), resp.@"error");
+    try testing.expectError(error.PERM, handle(notif, &supervisor));
 }
 
 test "openat /tmp/.bvisor/secret returns EPERM" {
@@ -258,9 +256,7 @@ test "openat /tmp/.bvisor/secret returns EPERM" {
     defer supervisor.deinit();
 
     const notif = makeOpenatNotif(init_tid, "/tmp/.bvisor/secret", 0, 0);
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.PERM))), resp.@"error");
+    try testing.expectError(error.PERM, handle(notif, &supervisor));
 }
 
 test "openat relative path resolves against cwd" {
@@ -290,9 +286,7 @@ test "openat empty path returns EINVAL" {
     defer supervisor.deinit();
 
     const notif = makeOpenatNotif(init_tid, "", 0, 0);
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.INVAL))), resp.@"error");
+    try testing.expectError(error.INVAL, handle(notif, &supervisor));
 }
 
 test "openat unknown caller PID returns ESRCH" {
@@ -306,9 +300,7 @@ test "openat unknown caller PID returns ESRCH" {
     defer supervisor.deinit();
 
     const notif = makeOpenatNotif(999, "/dev/null", 0, 0);
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+    try testing.expectError(error.SRCH, handle(notif, &supervisor));
 }
 
 test "openat /proc/999 non-existent returns ENOENT" {
@@ -322,7 +314,5 @@ test "openat /proc/999 non-existent returns ENOENT" {
     defer supervisor.deinit();
 
     const notif = makeOpenatNotif(init_tid, "/proc/999", 0, 0);
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.NOENT))), resp.@"error");
+    try testing.expectError(error.NOENT, handle(notif, &supervisor));
 }

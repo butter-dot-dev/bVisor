@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../LinuxErr.zig").LinuxErr;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
@@ -146,7 +146,7 @@ test "socketpair with SOCK_CLOEXEC sets cloexec flag" {
         .arg3 = @intFromPtr(&sv),
     });
 
-    try handle(notif, &supervisor);
+    _ = try handle(notif, &supervisor);
 
     const caller = supervisor.guest_threads.lookup.get(init_tid).?;
     try testing.expect(caller.fd_table.getCloexec(sv[0]));
@@ -173,7 +173,5 @@ test "socketpair unknown caller returns ESRCH" {
         .arg3 = @intFromPtr(&sv),
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+    try testing.expectError(error.SRCH, handle(notif, &supervisor));
 }

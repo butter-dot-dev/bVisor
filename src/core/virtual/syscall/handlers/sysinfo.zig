@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../LinuxErr.zig").LinuxErr;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Io = std.Io;
 const Supervisor = @import("../../../Supervisor.zig");
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
@@ -12,8 +12,6 @@ const LogBuffer = @import("../../../LogBuffer.zig");
 const generateUid = @import("../../../setup.zig").generateUid;
 
 pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOMP.notif_resp {
-    const logger = supervisor.logger;
-
     // Parse args: sysinfo(struct sysinfo *info)
     const buf_addr: u64 = notif.data.arg0;
 
@@ -53,10 +51,9 @@ test "sysinfo returns virtualized system info" {
 
     var info: linux.Sysinfo = undefined;
     const notif = makeNotif(.sysinfo, .{ .pid = init_tid, .arg0 = @intFromPtr(&info) });
-    const resp = handle(notif, &supervisor);
+    const resp = try handle(notif, &supervisor);
 
     try testing.expectEqual(@as(i64, 0), resp.val);
-    try testing.expectEqual(@as(i32, 0), resp.@"error");
 
     // Virtualized fields
     try testing.expectEqual(@as(u16, 1), info.procs); // one initial thread

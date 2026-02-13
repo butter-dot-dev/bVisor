@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../LinuxErr.zig").LinuxErr;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const types = @import("../../../types.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
@@ -153,7 +153,7 @@ test "write stdout: write, write, drain, write, drain" {
 
     // write "aaa"
     var d1 = "aaa".*;
-    try handle(makeNotif(.write, .{
+    _ = try handle(makeNotif(.write, .{
         .pid = init_tid,
         .arg0 = 1,
         .arg1 = @intFromPtr(&d1),
@@ -162,7 +162,7 @@ test "write stdout: write, write, drain, write, drain" {
 
     // write "bbb"
     var d2 = "bbb".*;
-    try handle(makeNotif(.write, .{
+    _ = try handle(makeNotif(.write, .{
         .pid = init_tid,
         .arg0 = 1,
         .arg1 = @intFromPtr(&d2),
@@ -176,7 +176,7 @@ test "write stdout: write, write, drain, write, drain" {
 
     // write "ccc"
     var d3 = "ccc".*;
-    try handle(makeNotif(.write, .{
+    _ = try handle(makeNotif(.write, .{
         .pid = init_tid,
         .arg0 = 1,
         .arg1 = @intFromPtr(&d3),
@@ -236,9 +236,7 @@ test "write to non-existent VFD returns EBADF" {
         .arg2 = data.len,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
+    try testing.expectError(error.BADF, handle(notif, &supervisor));
 }
 
 test "write with unknown caller PID returns ESRCH" {
@@ -260,9 +258,7 @@ test "write with unknown caller PID returns ESRCH" {
         .arg2 = data.len,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+    try testing.expectError(error.SRCH, handle(notif, &supervisor));
 }
 
 test "write to read-only backend (proc) returns EIO" {
@@ -288,7 +284,5 @@ test "write to read-only backend (proc) returns EIO" {
         .arg2 = data.len,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.IO))), resp.@"error");
+    try testing.expectError(error.IO, handle(notif, &supervisor));
 }

@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../LinuxErr.zig").LinuxErr;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Supervisor = @import("../../../Supervisor.zig");
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
@@ -29,7 +29,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
         const thread = entry.value_ptr.*;
         if (thread != caller) {
             const rc = linux.kill(thread.tid, linux.SIG.KILL);
-            try checkErr(rc, "exit_group: kill({d})", .{thread.tid});
+            checkErr(rc, "exit_group: kill({d})", .{thread.tid}) catch {};
         }
     }
 

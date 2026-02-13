@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../LinuxErr.zig").LinuxErr;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
@@ -68,9 +68,7 @@ test "shutdown unknown caller returns ESRCH" {
         .arg1 = linux.SHUT.RD,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+    try testing.expectError(error.SRCH, handle(notif, &supervisor));
 }
 
 test "shutdown invalid vfd returns EBADF" {
@@ -89,9 +87,7 @@ test "shutdown invalid vfd returns EBADF" {
         .arg1 = linux.SHUT.RD,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
+    try testing.expectError(error.BADF, handle(notif, &supervisor));
 }
 
 test "shutdown on socketpair succeeds" {
@@ -113,7 +109,7 @@ test "shutdown on socketpair succeeds" {
         .arg2 = 0,
         .arg3 = @intFromPtr(&sv),
     });
-    try socketpair_handler.handle(sp_notif, &supervisor);
+    _ = try socketpair_handler.handle(sp_notif, &supervisor);
 
     // Shutdown one end for writing
     const notif = makeNotif(.shutdown, .{

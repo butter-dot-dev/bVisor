@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../LinuxErr.zig").LinuxErr;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const iovec_const = std.posix.iovec_const;
 const types = @import("../../../types.zig");
 const Thread = @import("../../proc/Thread.zig");
@@ -266,7 +266,7 @@ test "writev stdout: write, write, drain, write, drain" {
         .{ .base = d1a.ptr, .len = d1a.len },
         .{ .base = d1b.ptr, .len = d1b.len },
     };
-    try handle(makeNotif(.writev, .{
+    _ = try handle(makeNotif(.writev, .{
         .pid = init_tid,
         .arg0 = 1,
         .arg1 = @intFromPtr(&iovecs1),
@@ -278,7 +278,7 @@ test "writev stdout: write, write, drain, write, drain" {
     var iovecs2 = [_]iovec_const{
         .{ .base = d2.ptr, .len = d2.len },
     };
-    try handle(makeNotif(.writev, .{
+    _ = try handle(makeNotif(.writev, .{
         .pid = init_tid,
         .arg0 = 1,
         .arg1 = @intFromPtr(&iovecs2),
@@ -295,7 +295,7 @@ test "writev stdout: write, write, drain, write, drain" {
     var iovecs3 = [_]iovec_const{
         .{ .base = d3.ptr, .len = d3.len },
     };
-    try handle(makeNotif(.writev, .{
+    _ = try handle(makeNotif(.writev, .{
         .pid = init_tid,
         .arg0 = 1,
         .arg1 = @intFromPtr(&iovecs3),
@@ -331,7 +331,5 @@ test "writev non-existent VFD returns EBADF" {
         .arg2 = 1,
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
+    try testing.expectError(error.BADF, handle(notif, &supervisor));
 }

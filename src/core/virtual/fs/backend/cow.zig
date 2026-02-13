@@ -1,6 +1,6 @@
 const std = @import("std");
 const linux = std.os.linux;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const OverlayRoot = @import("../../OverlayRoot.zig");
 
 const BackingFD = linux.fd_t;
@@ -433,7 +433,7 @@ test "open non-existent file RDONLY returns ENOENT" {
     defer overlay.deinit();
 
     const result = Cow.open(&overlay, "/nonexistent/path/file.txt", .{ .ACCMODE = .RDONLY }, 0o644);
-    try testing.expectError(error.FileNotFound, result);
+    try testing.expectError(error.NOENT, result);
 }
 
 test "open non-existent file WRONLY without CREAT fails" {
@@ -443,7 +443,7 @@ test "open non-existent file WRONLY without CREAT fails" {
     defer overlay.deinit();
 
     const result = Cow.open(&overlay, "/nonexistent/path/file.txt", .{ .ACCMODE = .WRONLY }, 0o644);
-    try testing.expectError(error.FileNotFound, result);
+    try testing.expectError(error.NOENT, result);
 }
 
 test "COW open deep path creates parent dirs in overlay" {

@@ -2,8 +2,7 @@ const std = @import("std");
 const linux = std.os.linux;
 const types = @import("../../types.zig");
 const Supervisor = @import("../../Supervisor.zig");
-const LinuxErr = @import("../../LinuxErr.zig").LinuxErr;
-const replyErr = @import("../../seccomp/notif.zig").replyErr;
+const LinuxErr = @import("../../linux_error.zig").LinuxErr;
 const replyContinue = @import("../../seccomp/notif.zig").replyContinue;
 
 const read = @import("handlers/read.zig");

@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../LinuxErr.zig").LinuxErr;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
@@ -83,9 +83,7 @@ test "connect unknown caller returns ESRCH" {
         .arg2 = @sizeOf(linux.sockaddr.un),
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.SRCH))), resp.@"error");
+    try testing.expectError(error.SRCH, handle(notif, &supervisor));
 }
 
 test "connect invalid vfd returns EBADF" {
@@ -106,9 +104,7 @@ test "connect invalid vfd returns EBADF" {
         .arg2 = @sizeOf(linux.sockaddr.un),
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.BADF))), resp.@"error");
+    try testing.expectError(error.BADF, handle(notif, &supervisor));
 }
 
 test "connect on non-socket file returns ENOTSOCK" {
@@ -134,9 +130,7 @@ test "connect on non-socket file returns ENOTSOCK" {
         .arg2 = @sizeOf(linux.sockaddr.un),
     });
 
-    const resp = handle(notif, &supervisor);
-    try testing.expect(if (resp) |_| false else |_| true);
-    try testing.expectEqual(-@as(i32, @intCast(@intFromEnum(linux.E.NOTSOCK))), resp.@"error");
+    try testing.expectError(error.NOTSOCK, handle(notif, &supervisor));
 }
 
 test "connect UDP socket to localhost succeeds" {

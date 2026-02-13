@@ -1,42 +1,5 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const linux = std.os.linux;
-
-// want to get rid of LinuxResult
-// is sorta like an error union, but don't get a try on it. so the unwrap is the try equivalent
-// our new design is to just to convert a linux error code into a literal error and then bubbling that up with Zig's compiler
-// everywhere where this is used, use our simpler handling instead of this unwrap stuff
-pub fn LinuxResult(comptime T: type) type {
-    return union(enum) {
-        Ok: T,
-        Error: linux.E,
-
-        const Self = @This();
-
-        pub fn from(result: usize) Self {
-            const err = linux.errno(result);
-            if (err != .SUCCESS) {
-                return Self{ .Error = err };
-            }
-            // Type-specific success value handling
-            const ok_value: T = switch (@typeInfo(T)) {
-                .bool => true,
-                .void => {},
-                else => @intCast(result),
-            };
-            return Self{ .Ok = ok_value };
-        }
-
-        /// Returns inner value, or throws a general error
-        /// If specific error types are needed, prefer to switch on Result then switch on Error branch
-        pub fn unwrap(self: Self) !T {
-            return switch (self) {
-                .Ok => |value| value,
-                .Error => error.SyscallFailed,
-            };
-        }
-    };
-}
 
 pub const Logger = struct {
     pub const Name = enum {

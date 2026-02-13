@@ -1,7 +1,7 @@
 const std = @import("std");
 const linux = std.os.linux;
-const LinuxErr = @import("../../../LinuxErr.zig").LinuxErr;
-const checkErr = @import("../../../LinuxErr.zig").checkErr;
+const LinuxErr = @import("../../../linux_error.zig").LinuxErr;
+const checkErr = @import("../../../linux_error.zig").checkErr;
 const Supervisor = @import("../../../Supervisor.zig");
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
 const memory_bridge = @import("../../../utils/memory_bridge.zig");
@@ -53,10 +53,9 @@ test "uname returns virtualized system info" {
 
     var uts: linux.utsname = undefined;
     const notif = makeNotif(.uname, .{ .pid = init_tid, .arg0 = @intFromPtr(&uts) });
-    const resp = handle(notif, &supervisor);
+    const resp = try handle(notif, &supervisor);
 
     try testing.expectEqual(@as(i64, 0), resp.val);
-    try testing.expectEqual(@as(i32, 0), resp.@"error");
 
     // Virtualized fields
     try testing.expectEqualStrings("bvisor", std.mem.sliceTo(&uts.nodename, 0));
