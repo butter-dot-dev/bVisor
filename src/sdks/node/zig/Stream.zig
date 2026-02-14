@@ -24,13 +24,18 @@ pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
 
 /// Returns JS type (Uint8array | none)
 pub fn next(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
-    const self = napi.ZigExternal(Self).unwrap(env, info) catch return null;
+    const allocator = napi.global_allocator;
 
-    const data = self.buffer.read(napi.allocator, self.io) catch |err| {
+    // Copy args into native zig types
+    const args = napi.getArgs(env, info, 1) catch return null;
+    const self = napi.getSelf(Self, env, args[0]) catch return null;
+
+    const data = self.buffer.read(allocator, self.io) catch |err| {
         std.log.err("streamNext failed: {s}", .{@errorName(err)});
         return null;
     };
-    defer napi.allocator.free(data); // free the data after it's been returned as a JS-managed Uint8Array
+    defer allocator.free(data); // free the data after it's been returned as a JS-managed Uint8Array
+
     if (data.len == 0) return null;
     return napi.createUint8Array(env, data.ptr, data.len) catch return null;
 }

@@ -3,7 +3,7 @@ const std = @import("std");
 
 // Global allocator is unique per thread that imports this lib
 var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
-pub const allocator = gpa.allocator();
+pub const global_allocator = gpa.allocator();
 
 // Global Io instance, initialized in napi_register_module_v1
 var threaded: std.Io.Threaded = undefined;
@@ -11,7 +11,7 @@ pub var io: std.Io = undefined;
 var io_initialized: bool = false;
 
 pub fn initIo() void {
-    threaded = .init(allocator, .{ .environ = .empty });
+    threaded = .init(global_allocator, .{ .environ = .empty });
     io = threaded.io();
     io_initialized = true;
 }
@@ -77,6 +77,33 @@ pub fn createObject(env: c.napi_env) !c.napi_value {
     return result;
 }
 
+/// Extract a UTF-8 string from a napi_value
+/// Caller owns and must free
+pub fn getStringOwned(allocator: std.mem.Allocator, env: c.napi_env, value: c.napi_value) ![:0]const u8 {
+    // Get string length (excluding null terminator)
+    var len: usize = 0;
+    if (c.napi_get_value_string_utf8(env, value, null, 0, &len) != c.napi_ok) {
+        throw(env, "Failed to get string length");
+        return error.NapiError;
+    }
+
+    // Allocate len+1 for the null terminator
+    const buf = allocator.alloc(u8, len + 1) catch {
+        throw(env, "Failed to allocate string buffer");
+        return error.NapiError;
+    };
+    errdefer allocator.free(buf);
+
+    var actual_len: usize = 0;
+    if (c.napi_get_value_string_utf8(env, value, buf.ptr, len + 1, &actual_len) != c.napi_ok) {
+        throw(env, "Failed to get string");
+        return error.NapiError;
+    }
+    buf[len] = 0;
+
+    return buf[0..len :0];
+}
+
 /// Set a named property on a JS object: obj[name] = value
 pub fn setProperty(env: c.napi_env, obj: c.napi_value, comptime name: [:0]const u8, value: c.napi_value) !void {
     if (c.napi_set_named_property(env, obj, name, value) != c.napi_ok) {
@@ -102,6 +129,32 @@ pub fn registerFunction(
     }
 }
 
+
+/// Get up to arg_count arguments from the callback info
+pub fn getArgs(env: c.napi_env, info: c.napi_callback_info, comptime arg_count: usize) ![arg_count]c.napi_value {
+    var argc: usize = arg_count;
+    var argv: [arg_count]c.napi_value = undefined;
+    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != c.napi_ok) {
+        throw(env, "Failed to get callback info");
+        return error.NapiError;
+    }
+    return argv;
+}
+
+/// Extract a *T from a napi_value external
+pub fn getSelf(comptime T: type, env: c.napi_env, value: c.napi_value) !*T {
+    var data: ?*anyopaque = null;
+    if (c.napi_get_value_external(env, value, &data) != c.napi_ok) {
+        throw(env, "Argument must be " ++ @typeName(T));
+        return error.NapiError;
+    }
+    if (data) |ptr| {
+        return @ptrCast(@alignCast(ptr));
+    }
+    throw(env, "Null " ++ @typeName(T) ++ " pointer");
+    return error.NapiError;
+}
+
 /// Generates create/wrap/unwrap/finalize helpers for exposing a Zig type as an N-API external.
 /// All JS-facing values are plain c.napi_value — type discipline lives on the TS side via External<T>.
 pub fn ZigExternal(comptime T: type) type {
@@ -109,12 +162,12 @@ pub fn ZigExternal(comptime T: type) type {
         /// N-API callback: creates a new T instance and wraps it as an external.
         /// Use this in lib.zig to declare the constructor function.
         pub fn create(env: c.napi_env, _: c.napi_callback_info) callconv(.c) c.napi_value {
-            const self = T.init(allocator) catch {
+            const self = T.init(global_allocator) catch {
                 throw(env, "Failed to initialize " ++ @typeName(T));
                 return null;
             };
             return wrap(env, self) catch {
-                self.deinit(allocator);
+                self.deinit(global_allocator);
                 return null;
             };
         }
@@ -123,7 +176,7 @@ pub fn ZigExternal(comptime T: type) type {
         fn finalize(_: c.napi_env, data: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
             if (data) |ptr| {
                 var self: *T = @ptrCast(@alignCast(ptr));
-                self.deinit(allocator);
+                self.deinit(global_allocator);
             }
         }
 
@@ -138,31 +191,10 @@ pub fn ZigExternal(comptime T: type) type {
             return result;
         }
 
-        /// Extract the first argument as an external and unwrap it to *T.
+        /// Extract the first argument as an external and unwrap it to *T
         pub fn unwrap(env: c.napi_env, info: c.napi_callback_info) !*T {
-            var argc: usize = 1;
-            var argv: [1]c.napi_value = undefined;
-            if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != c.napi_ok) {
-                throw(env, "Failed to get callback info");
-                return error.NapiError;
-            }
-            if (argc < 1) {
-                throw(env, "Expected " ++ @typeName(T) ++ " argument");
-                return error.NapiError;
-            }
-            var data: ?*anyopaque = null;
-
-            if (c.napi_get_value_external(env, argv[0], &data) != c.napi_ok) {
-                throw(env, "Argument must be " ++ @typeName(T));
-                return error.NapiError;
-            }
-
-            if (data) |ptr| {
-                const self: *T = @ptrCast(@alignCast(ptr));
-                return self;
-            }
-            throw(env, "Null " ++ @typeName(T) ++ " pointer");
-            return error.NapiError;
+            const args = getArgs(env, info, 1) catch return error.NapiError;
+            return getSelf(T, env, args[0]);
         }
     };
 }

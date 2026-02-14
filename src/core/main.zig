@@ -5,8 +5,8 @@ const LogBuffer = @import("LogBuffer.zig");
 const setup = @import("setup.zig");
 const Io = std.Io;
 const File = Io.File;
+const linux = std.os.linux;
 const execute = setup.execute;
-const smokeTest = @import("smoke_test.zig").smokeTest;
 
 test {
     _ = @import("Supervisor.zig");
@@ -54,29 +54,27 @@ test {
     _ = @import("virtual/syscall/handlers/sendto.zig");
     _ = @import("virtual/syscall/handlers/sendmsg.zig");
     _ = @import("virtual/syscall/handlers/recvmsg.zig");
+    _ = @import("virtual/syscall/handlers/execve.zig");
     _ = @import("virtual/syscall/e2e_test.zig");
     _ = @import("virtual/OverlayRoot.zig");
     _ = @import("virtual/fs/backend/passthrough.zig");
 }
 
-pub fn main() !void {
+const DEFAULT_CMD = "echo hello world";
+
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
+
     const logger = Logger.init(.prefork);
-    logger.log("Running smoke test with syscall interception:", .{});
-
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    var threaded: std.Io.Threaded = .init(allocator, .{ .environ = .empty });
-    defer threaded.deinit();
-    const io = threaded.io();
+    logger.log("Running bash via execve: {s}", .{DEFAULT_CMD});
 
     var stdout = LogBuffer.init(allocator);
     var stderr = LogBuffer.init(allocator);
     defer stdout.deinit();
     defer stderr.deinit();
 
-    try execute(allocator, io, setup.generateUid(io), smokeTest, &stdout, &stderr);
+    try execute(allocator, io, setup.generateUid(io), DEFAULT_CMD, &stdout, &stderr);
     try stdout.flush(io, File.stdout());
     try stderr.flush(io, File.stderr());
 }
