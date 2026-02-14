@@ -5,8 +5,8 @@ const LogBuffer = @import("LogBuffer.zig");
 const setup = @import("setup.zig");
 const Io = std.Io;
 const File = Io.File;
+const linux = std.os.linux;
 const execute = setup.execute;
-const smokeTest = @import("smoke_test.zig").smokeTest;
 
 test {
     _ = @import("Supervisor.zig");
@@ -54,14 +54,22 @@ test {
     _ = @import("virtual/syscall/handlers/sendto.zig");
     _ = @import("virtual/syscall/handlers/sendmsg.zig");
     _ = @import("virtual/syscall/handlers/recvmsg.zig");
+    _ = @import("virtual/syscall/handlers/execve.zig");
     _ = @import("virtual/syscall/e2e_test.zig");
     _ = @import("virtual/OverlayRoot.zig");
     _ = @import("virtual/fs/backend/passthrough.zig");
 }
 
+fn runBash() void {
+    const argv = [_:null]?[*:0]const u8{ "/bin/sh", "-c", "echo hello world" };
+    const envp = [_:null]?[*:0]const u8{};
+    _ = linux.execve("/bin/sh", &argv, &envp);
+    linux.exit_group(1); // only reached if execve fails
+}
+
 pub fn main() !void {
     const logger = Logger.init(.prefork);
-    logger.log("Running smoke test with syscall interception:", .{});
+    logger.log("Running bash via execve:", .{});
 
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
@@ -76,7 +84,7 @@ pub fn main() !void {
     defer stdout.deinit();
     defer stderr.deinit();
 
-    try execute(allocator, io, setup.generateUid(io), smokeTest, &stdout, &stderr);
+    try execute(allocator, io, setup.generateUid(io), runBash, &stdout, &stderr);
     try stdout.flush(io, File.stdout());
     try stderr.flush(io, File.stderr());
 }
