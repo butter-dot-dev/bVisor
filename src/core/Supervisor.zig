@@ -81,6 +81,29 @@ pub fn deinit(self: *Self) void {
     // LogBuffers are owned by caller, not freed here
 }
 
+const STACK_FALLBACK_SIZE = 1024;
+pub const ScratchArena = struct {
+    stack_fallback: std.heap.StackFallbackAllocator(STACK_FALLBACK_SIZE),
+    arena: std.heap.ArenaAllocator,
+
+    pub fn init(backing: Allocator) ScratchArena {
+        var self: ScratchArena = .{
+            .stack_fallback = std.heap.stackFallback(STACK_FALLBACK_SIZE, backing),
+            .arena = undefined,
+        };
+        self.arena = std.heap.ArenaAllocator.init(self.stack_fallback.get());
+        return self;
+    }
+
+    pub fn allocator(self: *ScratchArena) Allocator {
+        return self.arena.allocator();
+    }
+
+    pub fn deinit(self: *ScratchArena) void {
+        self.arena.deinit();
+    }
+};
+
 const MAX_INFLIGHT = 8;
 const HandlerReturn = @typeInfo(@TypeOf(Self.handleNotif)).@"fn".return_type.?;
 

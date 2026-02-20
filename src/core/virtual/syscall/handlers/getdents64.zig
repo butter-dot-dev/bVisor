@@ -6,6 +6,7 @@ const Thread = @import("../../proc/Thread.zig");
 const AbsTid = Thread.AbsTid;
 const File = @import("../../fs/File.zig");
 const Supervisor = @import("../../../Supervisor.zig");
+const ScratchArena = Supervisor.ScratchArena;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
 const replyContinue = @import("../../../seccomp/notif.zig").replyContinue;
 const memory_bridge = @import("../../../utils/memory_bridge.zig");
@@ -43,13 +44,16 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
     const capped_count = @min(count, max_len);
 
     // Mutex protects namespace threads (proc) and tombstones (cow/tmp)
+    var scratch = ScratchArena.init(supervisor.allocator);
+    defer scratch.deinit();
+
     const n: usize = switch (file.backend) {
         .proc, .cow, .tmp => blk: {
             supervisor.mutex.lockUncancelable(supervisor.io);
             defer supervisor.mutex.unlock(supervisor.io);
             const caller = if (file.backend == .proc) try supervisor.guest_threads.get(caller_tid) else null;
             break :blk try file.getdents64(
-                supervisor.allocator,
+                scratch.allocator(),
                 stack_buf[0..capped_count],
                 caller,
                 &supervisor.overlay,
@@ -57,7 +61,7 @@ pub fn handle(notif: linux.SECCOMP.notif, supervisor: *Supervisor) !linux.SECCOM
             );
         },
         else => try file.getdents64(
-            supervisor.allocator,
+            scratch.allocator(),
             stack_buf[0..capped_count],
             null,
             &supervisor.overlay,

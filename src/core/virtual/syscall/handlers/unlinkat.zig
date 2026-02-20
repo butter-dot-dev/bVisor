@@ -12,6 +12,7 @@ const resolveAndRoute = path_router.resolveAndRoute;
 const OverlayRoot = @import("../../OverlayRoot.zig");
 const Tombstones = @import("../../Tombstones.zig");
 const Supervisor = @import("../../../Supervisor.zig");
+const ScratchArena = Supervisor.ScratchArena;
 const replySuccess = @import("../../../seccomp/notif.zig").replySuccess;
 const memory_bridge = @import("../../../utils/memory_bridge.zig");
 
@@ -159,7 +160,9 @@ fn handleCowRmdir(normalized: []const u8, supervisor: *Supervisor) !void {
     }
 
     // Check directory is empty from guest perspective (merged view)
-    const empty = try cow_mod.isDirEmpty(supervisor.allocator, normalized, &supervisor.overlay, &supervisor.tombstones);
+    var scratch = ScratchArena.init(supervisor.allocator);
+    defer scratch.deinit();
+    const empty = try cow_mod.isDirEmpty(scratch.allocator(), normalized, &supervisor.overlay, &supervisor.tombstones);
     if (!empty) {
         return error.NOTEMPTY;
     }
@@ -229,7 +232,9 @@ fn handleTmpRmdir(normalized: []const u8, supervisor: *Supervisor) !void {
     }
 
     // Check emptiness: read overlay entries, filter tombstoned children
-    const empty = try tmp_mod.isDirEmpty(supervisor.allocator, &supervisor.overlay, normalized, &supervisor.tombstones);
+    var scratch = ScratchArena.init(supervisor.allocator);
+    defer scratch.deinit();
+    const empty = try tmp_mod.isDirEmpty(scratch.allocator(), &supervisor.overlay, normalized, &supervisor.tombstones);
     if (!empty) {
         return error.NOTEMPTY;
     }
